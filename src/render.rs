@@ -2,7 +2,7 @@
 //! literal-absorption on hidden tokens), framed/themed tooltip, and a worst-state class.
 
 use crate::config::{OnMissing, PrinterConfig};
-use crate::model::{Level, PrinterState, Reason, Status, Supply, SupplyClass};
+use crate::model::{Color, Level, PrinterState, Reason, Status, Supply, SupplyClass, SupplyKind};
 use crate::theme::ThemeColors;
 use crate::waybar::{
     bold_fg, bottom_border, fg, pango_escape, separator, top_border, visible_len, WaybarOutput,
@@ -196,23 +196,76 @@ fn level_str(l: Level) -> String {
     }
 }
 
-fn supply_bar(s: &Supply) -> String {
-    match s.level.as_pct() {
-        Some(p) => {
-            let filled = (p as usize).div_ceil(20); // 0..=5 cells
-            let cells: String = (0..5).map(|i| if i < filled { '▰' } else { '▱' }).collect();
-            format!("{cells} {p}%")
-        }
-        None => level_str(s.level),
-    }
-}
-
 fn supply_color<'a>(s: &Supply, cfg: &PrinterConfig, t: &'a ThemeColors) -> &'a str {
     match supply_badness(s) {
         Some(b) if b <= cfg.thresholds.supply_critical => &t.error,
         Some(b) if b <= cfg.thresholds.supply_low => &t.orange,
         Some(_) => &t.green,
         None => &t.dim,
+    }
+}
+
+/// Sentinel row rendered as a full-width section separator.
+const SEP: &str = "\u{1}sep";
+
+/// A representative visible color for a supply's colorant (toner/ink identity swatch).
+fn swatch_color(c: Option<Color>) -> &'static str {
+    match c {
+        Some(Color::Black) => "#c8c8c8",
+        Some(Color::Cyan) => "#26c6da",
+        Some(Color::Magenta) => "#d05ce3",
+        Some(Color::Yellow) => "#fbc02d",
+        Some(Color::TriColor) => "#9ccc65",
+        Some(Color::Photo) => "#90a4ae",
+        _ => "#8a8a8a",
+    }
+}
+
+/// Short, alignable supply label: the colorant name, else the kind, else the full name.
+fn supply_label(s: &Supply) -> String {
+    let named = match s.color {
+        Some(Color::Black) => Some("Black"),
+        Some(Color::Cyan) => Some("Cyan"),
+        Some(Color::Magenta) => Some("Magenta"),
+        Some(Color::Yellow) => Some("Yellow"),
+        Some(Color::TriColor) => Some("Tri-color"),
+        Some(Color::Photo) => Some("Photo"),
+        _ => None,
+    };
+    if let Some(n) = named {
+        return n.into();
+    }
+    match s.kind {
+        SupplyKind::Drum => "Drum".into(),
+        SupplyKind::Waste => "Waste".into(),
+        _ => s.name.clone(),
+    }
+}
+
+/// The 5-cell level bar, or `None` when the level is a sentinel (unknown/etc).
+fn supply_cells(s: &Supply) -> Option<String> {
+    s.level.as_pct().map(|p| {
+        let filled = (p as usize).div_ceil(20);
+        (0..5).map(|i| if i < filled { '▰' } else { '▱' }).collect()
+    })
+}
+
+/// Status dot color: green when healthy, orange for warnings, red for hard faults, dim offline.
+fn status_dot<'a>(state: &PrinterState, t: &'a ThemeColors) -> &'a str {
+    let hard = |r: &Reason| {
+        matches!(
+            r,
+            Reason::Jam | Reason::MediaEmpty | Reason::SupplyEmpty | Reason::CoverOpen
+        )
+    };
+    if state.status == Some(Status::Offline) || state.reasons.contains(&Reason::Offline) {
+        &t.dim
+    } else if state.status == Some(Status::Stopped) || state.reasons.iter().any(hard) {
+        &t.error
+    } else if !state.reasons.is_empty() {
+        &t.orange
+    } else {
+        &t.green
     }
 }
 
@@ -226,6 +279,7 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors) -> 
             "model" => {
                 if let Some(m) = &state.model {
                     rows.push(bold_fg(&t.accent, &pango_escape(m)));
+                    rows.push(SEP.into());
                 } else if cfg.tooltip.on_missing == OnMissing::Error {
                     rows.push(format!("{} {}", label("Model"), fg(&t.error, "n/d")));
                 }
@@ -233,12 +287,11 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors) -> 
             "status" if state.status.is_some() => {
                 rows.push(format!(
                     "{} {}",
-                    label("Status"),
+                    fg(status_dot(state, t), "●"),
                     fg(&t.text, status_text(state.status.as_ref()))
                 ));
             }
-            // The literal text shown on the printer's front panel (e.g. "Sleep mode is on.",
-            // "Paper jam in tray 2"). This is where the printer's own messages surface.
+            // The literal text on the printer's front panel ("Ready", "Paper jam in tray 2", ...).
             "display" => {
                 if let Some(d) = &state.display {
                     rows.push(format!(
@@ -257,31 +310,63 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors) -> 
             }
             "supplies" => {
                 let cap = cfg.tooltip.max_rows.max(1);
-                let total = state.supplies.len();
-                for s in state.supplies.iter().take(cap) {
-                    let name = pango_escape(&s.name);
+                let shown: Vec<&Supply> = state.supplies.iter().take(cap).collect();
+                let label_w = shown
+                    .iter()
+                    .map(|s| supply_label(s).chars().count())
+                    .max()
+                    .unwrap_or(0)
+                    .min(12);
+                let val_w = shown
+                    .iter()
+                    .map(|s| level_str(s.level).chars().count())
+                    .max()
+                    .unwrap_or(0);
+                for s in &shown {
+                    let lbl = supply_label(s);
+                    let lpad = " ".repeat(label_w.saturating_sub(lbl.chars().count()));
+                    let val = level_str(s.level);
+                    let vpad = " ".repeat(val_w.saturating_sub(val.chars().count()));
+                    let bar_col = supply_color(s, cfg, t);
+                    let cells = supply_cells(s).unwrap_or_else(|| "     ".into());
                     rows.push(format!(
-                        "{}  {}",
-                        fg(&t.text, &name),
-                        fg(supply_color(s, cfg, t), &supply_bar(s))
+                        "{} {}{}  {}  {}{}",
+                        fg(swatch_color(s.color), "●"),
+                        fg(&t.text, &pango_escape(&lbl)),
+                        lpad,
+                        fg(bar_col, &cells),
+                        vpad,
+                        fg(bar_col, &val)
                     ));
                 }
-                if total > cap {
-                    rows.push(fg(&t.dim, &format!("+{} more", total - cap)));
+                if state.supplies.len() > cap {
+                    rows.push(fg(
+                        &t.dim,
+                        &format!("   +{} more", state.supplies.len() - cap),
+                    ));
                 }
             }
             "paper" => {
                 let cap = cfg.tooltip.max_rows.max(1);
-                let total = state.paper.len();
-                for tray in state.paper.iter().take(cap) {
+                let shown: Vec<&crate::model::InputTray> = state.paper.iter().take(cap).collect();
+                let name_w = shown
+                    .iter()
+                    .map(|tr| tr.name.chars().count())
+                    .max()
+                    .unwrap_or(0)
+                    .min(14);
+                for tray in &shown {
+                    let npad = " ".repeat(name_w.saturating_sub(tray.name.chars().count()));
                     rows.push(format!(
-                        "{} {}",
-                        label(&pango_escape(&tray.name)),
+                        "{} {}{}  {}",
+                        label("\u{f0a48}"), // tray glyph
+                        fg(&t.dim, &pango_escape(&tray.name)),
+                        npad,
                         fg(&t.text, &level_str(tray.level))
                     ));
                 }
-                if total > cap {
-                    rows.push(fg(&t.dim, &format!("+{} more", total - cap)));
+                if state.paper.len() > cap {
+                    rows.push(fg(&t.dim, &format!("   +{} more", state.paper.len() - cap)));
                 }
             }
             "jobs" => {
@@ -301,26 +386,34 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors) -> 
             _ => {}
         }
     }
+    // Drop a trailing separator (e.g. model header with nothing after it).
+    while rows.last().map(|r| r.as_str()) == Some(SEP) {
+        rows.pop();
+    }
     if rows.is_empty() {
         rows.push(fg(&t.dim, "no data"));
     }
 
     let width = rows
         .iter()
+        .filter(|r| r.as_str() != SEP)
         .map(|r| visible_len(r))
         .max()
         .unwrap_or(0)
         .max(12);
     let mut out = vec![top_border(width, &t.border)];
     for r in &rows {
-        let pad = " ".repeat(width.saturating_sub(visible_len(r)));
-        out.push(format!(
-            "{} {r}{pad} {}",
-            fg(&t.border, "│"),
-            fg(&t.border, "│")
-        ));
+        if r == SEP {
+            out.push(separator(width, &t.border, &t.dim));
+        } else {
+            let pad = " ".repeat(width.saturating_sub(visible_len(r)));
+            out.push(format!(
+                "{} {r}{pad} {}",
+                fg(&t.border, "│"),
+                fg(&t.border, "│")
+            ));
+        }
     }
-    let _ = separator; // available for future grouping
     out.push(bottom_border(width, &t.border));
     out.join("\n")
 }
