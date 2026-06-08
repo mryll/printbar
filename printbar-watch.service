@@ -1,0 +1,15 @@
+[Unit]
+Description=printbar — refresh Waybar instantly on CUPS print events
+Documentation=https://github.com/mryll/printbar
+After=default.target
+
+[Service]
+Type=simple
+# Set PRINTBAR_WAYBAR_SIGNAL to match your Waybar module's "signal" (default 15).
+Environment=PRINTBAR_WAYBAR_SIGNAL=15
+ExecStart=@BIN@/printbar-watch
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

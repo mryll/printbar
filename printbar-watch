@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# printbar-watch — refresh Waybar's printbar module(s) instantly on CUPS print events.
+#
+# It subscribes (via the CUPS `dbus` notifier) to job/printer events for every local
+# queue, then listens on the system bus and sends SIGRTMIN+N to Waybar on each event so
+# the printbar module re-runs immediately (no waiting for its poll interval).
+#
+# N defaults to 15; override with PRINTBAR_WAYBAR_SIGNAL to match your module's "signal".
+set -uo pipefail
+
+SIGNAL="${PRINTBAR_WAYBAR_SIGNAL:-15}"
+DEBOUNCE_NS=700000000 # 0.7s
+
+subtest="$(mktemp "${TMPDIR:-/tmp}/printbar-sub.XXXXXX")" || exit 1
+trap 'rm -f "$subtest"' EXIT
+cat > "$subtest" <<'IPPT'
+{
+  OPERATION Create-Printer-Subscriptions
+  GROUP operation-attributes-tag
+  ATTR charset attributes-charset utf-8
+  ATTR naturalLanguage attributes-natural-language en
+  ATTR uri printer-uri $uri
+  ATTR name requesting-user-name $user
+  GROUP subscription-attributes-tag
+  ATTR uri notify-recipient-uri dbus://
+  ATTR keyword notify-events job-created job-completed job-state-changed printer-state-changed printer-stopped
+  ATTR integer notify-lease-duration 0
+}
+IPPT
+
+subscribe() {
+  local p
+  for p in $(lpstat -e 2>/dev/null); do
+    ipptool -tv -d user="$USER" "ipp://localhost/printers/$p" "$subtest" >/dev/null 2>&1
+  done
+}
+
+# Re-subscribe periodically so a cupsd restart (which drops subscriptions) is tolerated.
+( while true; do subscribe; sleep 300; done ) &
+trap 'rm -f "$subtest"; kill %1 2>/dev/null' EXIT
+
+# Refresh on each CUPS notifier signal, debounced.
+last=0
+dbus-monitor --system "type='signal',interface='org.cups.cupsd.Notifier'" 2>/dev/null |
+  while read -r line; do
+    case "$line" in
+      *"member=Job"* | *"member=Printer"*)
+        now=$(date +%s%N)
+        if ((now - last > DEBOUNCE_NS)); then
+          pkill -RTMIN+"$SIGNAL" waybar 2>/dev/null
+          printf 'printbar-watch: CUPS event → Waybar refreshed (RTMIN+%s)\n' "$SIGNAL" >&2
+          last=$now
+        fi
+        ;;
+    esac
+  done
