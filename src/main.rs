@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+mod actions;
 mod config;
 mod merge;
 mod model;
@@ -45,9 +46,16 @@ fn run() -> Result<(), String> {
 }
 
 fn run_action(args: &[String]) -> Result<(), String> {
-    // Wired in Task 8 (actions module). For now, a clear error keeps the contract.
-    let _ = args;
-    Err("actions not implemented yet".into())
+    // printbar action <ews|queue> --printer <name>
+    let kind = args.get(2).ok_or("action: missing <ews|queue>")?;
+    let name = flag_value(args, "--printer").ok_or("action: missing --printer <name>")?;
+    let cfg = Config::load(&config_path())?;
+    let pc = cfg.for_printer(&name).ok_or_else(|| format!("no [printer.{name}] in config"))?;
+    actions::run(kind, pc)
+}
+
+fn flag_value(args: &[String], flag: &str) -> Option<String> {
+    args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned()
 }
 
 fn build_target(pc: &PrinterConfig) -> Target {
