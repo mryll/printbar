@@ -16,7 +16,7 @@ format = "🖨 {supply_min}% {status_icon}"
 on_missing = "hide"          # "hide" | "error"
 
 [printer.oficina.tooltip]
-items = ["model", "status", "supplies", "paper", "jobs", "pages"]
+items = ["model", "status", "supplies", "paper", "jobs", "impressions"]
 on_missing = "hide"
 max_rows = 12
 

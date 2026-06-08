@@ -95,7 +95,7 @@ fn resolve(token: &str, state: &PrinterState) -> Option<String> {
         "model" => state.model.clone(),
         "name" => state.name.clone(),
         "jobs" => state.jobs.map(|j| j.to_string()),
-        "pages" => state.pages.map(|p| p.to_string()),
+        "pages" | "impressions" => state.pages.map(|p| p.to_string()),
         "paper" => state
             .paper
             .iter()
@@ -374,11 +374,11 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors) -> 
                     rows.push(format!("{} {}", label("Jobs"), fg(&t.text, &j.to_string())));
                 }
             }
-            "pages" => {
+            "pages" | "impressions" => {
                 if let Some(p) = state.pages {
                     rows.push(format!(
                         "{} {}",
-                        label("Pages"),
+                        label("Impressions"),
                         fg(&t.text, &p.to_string())
                     ));
                 }
