@@ -3,6 +3,7 @@ mod actions;
 mod config;
 mod merge;
 mod model;
+mod notify;
 mod render;
 mod sources;
 mod theme;
@@ -41,6 +42,7 @@ fn run() -> Result<(), String> {
     }
     let outcomes = run_sources(&target, srcs);
     let state = merge::merge(&outcomes);
+    notify::maybe_notify(name, pc, &state);
     let theme = theme::ThemeColors::load();
     render::render(&state, pc, &theme).print();
     Ok(())
