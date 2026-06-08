@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
+#[allow(dead_code)] // shared palette; not all colors used here
 pub struct ThemeColors {
     pub border: String,
     pub text: String,
@@ -94,8 +95,12 @@ fn parse_hex(hex: &str) -> Option<(u8, u8, u8)> {
 fn blend_hex(c1: &str, c2: &str, ratio: f32) -> String {
     let (r1, g1, b1) = parse_hex(c1).unwrap_or((171, 178, 191));
     let (r2, g2, b2) = parse_hex(c2).unwrap_or((40, 44, 52));
-    let blend = |a: u8, b: u8| -> u8 {
-        (a as f32 * (1.0 - ratio) + b as f32 * ratio).round() as u8
-    };
-    format!("#{:02x}{:02x}{:02x}", blend(r1, r2), blend(g1, g2), blend(b1, b2))
+    let blend =
+        |a: u8, b: u8| -> u8 { (a as f32 * (1.0 - ratio) + b as f32 * ratio).round() as u8 };
+    format!(
+        "#{:02x}{:02x}{:02x}",
+        blend(r1, r2),
+        blend(g1, g2),
+        blend(b1, b2)
+    )
 }

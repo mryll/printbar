@@ -2,7 +2,7 @@
 //! shells out to `notify-send`; a missing cache dir or notifier never fails the poll.
 
 use crate::config::PrinterConfig;
-use crate::model::{PrinterState, Reason, SupplyClass, Status};
+use crate::model::{PrinterState, Reason, Status, SupplyClass};
 use std::path::PathBuf;
 
 /// The set of currently-active notifiable events for a printer state.
@@ -47,7 +47,13 @@ pub fn diff_events(prev: &[String], cur: &[String], configured: &[String]) -> Ve
 pub fn cache_path(name: &str) -> PathBuf {
     let safe: String = name
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     let dir = std::env::var("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
@@ -83,7 +89,7 @@ fn emit(event: &str, printer: &str) {
         _ => event,
     };
     let _ = std::process::Command::new("notify-send")
-        .args(["-a", "printbar", &format!("{printer}"), msg])
+        .args(["-a", "printbar", printer, msg])
         .spawn();
 }
 
@@ -109,7 +115,10 @@ mod tests {
     fn transition_fires_once() {
         let cfg = vec!["jam".to_string()];
         // prev empty, cur has jam → fires
-        assert_eq!(diff_events(&[], &["jam".into()], &cfg), vec!["jam".to_string()]);
+        assert_eq!(
+            diff_events(&[], &["jam".into()], &cfg),
+            vec!["jam".to_string()]
+        );
         // prev already jam, cur still jam → nothing (steady state)
         assert!(diff_events(&["jam".into()], &["jam".into()], &cfg).is_empty());
     }

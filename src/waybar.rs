@@ -15,7 +15,10 @@ pub struct WaybarOutput {
 impl WaybarOutput {
     pub fn print(&self) {
         // serde_json on these owned String/Vec fields cannot fail.
-        println!("{}", serde_json::to_string(self).unwrap_or_else(|_| error_output("serialize")));
+        println!(
+            "{}",
+            serde_json::to_string(self).unwrap_or_else(|_| error_output("serialize"))
+        );
     }
 }
 
@@ -27,12 +30,15 @@ pub fn error_output(reason: &str) -> String {
         class: vec!["error".into()],
         alt: "error".into(),
     };
-    serde_json::to_string(&out)
-        .unwrap_or_else(|_| r#"{"text":"?","tooltip":"error","class":["error"],"alt":"error"}"#.into())
+    serde_json::to_string(&out).unwrap_or_else(|_| {
+        r#"{"text":"?","tooltip":"error","class":["error"],"alt":"error"}"#.into()
+    })
 }
 
 pub fn pango_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 pub fn fg(color: &str, text: &str) -> String {
@@ -46,7 +52,11 @@ pub fn bold_fg(color: &str, text: &str) -> String {
 pub fn border_line(content: &str, width: usize, border_color: &str) -> String {
     let pad = width.saturating_sub(visible_len(content));
     let right_pad = " ".repeat(pad);
-    format!("{} {content}{right_pad} {}", fg(border_color, "│"), fg(border_color, "│"))
+    format!(
+        "{} {content}{right_pad} {}",
+        fg(border_color, "│"),
+        fg(border_color, "│")
+    )
 }
 
 pub fn separator(width: usize, border_color: &str, dim_color: &str) -> String {

@@ -7,7 +7,6 @@ pub enum Status {
     Printing,
     Stopped,
     Offline,
-    Unknown,
 }
 
 /// Normalized printer conditions, sourced primarily from IPP `printer-state-reasons`
@@ -42,6 +41,7 @@ pub enum SupplyClass {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(clippy::enum_variant_names)]
 pub enum Color {
     Cyan,
     Magenta,
@@ -149,9 +149,24 @@ mod tests {
 
     #[test]
     fn usable_requires_real_consumable() {
-        let waste = supply(SupplyKind::Waste, SupplyClass::Filled, "Waste", Level::Pct(10));
-        let toner = supply(SupplyKind::Toner, SupplyClass::Consumed, "Black", Level::Pct(54));
-        let sentinel = supply(SupplyKind::Toner, SupplyClass::Consumed, "Cyan", Level::Unknown);
+        let waste = supply(
+            SupplyKind::Waste,
+            SupplyClass::Filled,
+            "Waste",
+            Level::Pct(10),
+        );
+        let toner = supply(
+            SupplyKind::Toner,
+            SupplyClass::Consumed,
+            "Black",
+            Level::Pct(54),
+        );
+        let sentinel = supply(
+            SupplyKind::Toner,
+            SupplyClass::Consumed,
+            "Cyan",
+            Level::Unknown,
+        );
         let unnamed = supply(SupplyKind::Ink, SupplyClass::Consumed, "", Level::Pct(40));
         assert!(!waste.is_usable());
         assert!(toner.is_usable());

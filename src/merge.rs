@@ -14,7 +14,10 @@ const JOBS_PRIORITY: [SourceKind; 3] = [SourceKind::Cups, SourceKind::Ipp, Sourc
 pub fn merge(outcomes: &[SourceOutcome]) -> PrinterState {
     // All sources errored/unreachable → offline.
     if !outcomes.is_empty() && outcomes.iter().all(|o| o.error.is_some()) {
-        return PrinterState { status: Some(Status::Offline), ..Default::default() };
+        return PrinterState {
+            status: Some(Status::Offline),
+            ..Default::default()
+        };
     }
 
     let find = |kind: SourceKind| outcomes.iter().find(|o| o.kind == kind).map(|o| &o.partial);
@@ -88,7 +91,12 @@ pub fn merge(outcomes: &[SourceOutcome]) -> PrinterState {
 }
 
 fn pick_supplies(outcomes: &[SourceOutcome]) -> Vec<Supply> {
-    let by = |kind: SourceKind| outcomes.iter().find(|o| o.kind == kind).map(|o| &o.partial.supplies);
+    let by = |kind: SourceKind| {
+        outcomes
+            .iter()
+            .find(|o| o.kind == kind)
+            .map(|o| &o.partial.supplies)
+    };
     // First: a source with at least one usable consumable.
     for k in RICH_PRIORITY {
         if let Some(s) = by(k) {
@@ -115,47 +123,93 @@ mod tests {
     use std::time::Duration;
 
     fn ok(kind: SourceKind, partial: PrinterState) -> SourceOutcome {
-        SourceOutcome { kind, partial, duration: Duration::ZERO, error: None }
+        SourceOutcome {
+            kind,
+            partial,
+            duration: Duration::ZERO,
+            error: None,
+        }
     }
     fn supply(kind: SupplyKind, class: SupplyClass, name: &str, level: Level) -> Supply {
-        Supply { name: name.into(), kind, class, color_raw: None, color: Some(Color::Black),
-            level, max_capacity: None, unit: None }
+        Supply {
+            name: name.into(),
+            kind,
+            class,
+            color_raw: None,
+            color: Some(Color::Black),
+            level,
+            max_capacity: None,
+            unit: None,
+        }
     }
 
     #[test]
     fn supplies_taken_wholesale_from_highest_usable() {
         let snmp = PrinterState {
-            supplies: vec![supply(SupplyKind::Waste, SupplyClass::Filled, "Waste", Level::Pct(20))],
+            supplies: vec![supply(
+                SupplyKind::Waste,
+                SupplyClass::Filled,
+                "Waste",
+                Level::Pct(20),
+            )],
             ..Default::default()
         };
         let cmyk = vec![
-            supply(SupplyKind::Toner, SupplyClass::Consumed, "Black", Level::Pct(54)),
-            supply(SupplyKind::Toner, SupplyClass::Consumed, "Cyan", Level::Pct(69)),
+            supply(
+                SupplyKind::Toner,
+                SupplyClass::Consumed,
+                "Black",
+                Level::Pct(54),
+            ),
+            supply(
+                SupplyKind::Toner,
+                SupplyClass::Consumed,
+                "Cyan",
+                Level::Pct(69),
+            ),
         ];
-        let ipp = PrinterState { supplies: cmyk.clone(), ..Default::default() };
+        let ipp = PrinterState {
+            supplies: cmyk.clone(),
+            ..Default::default()
+        };
         let got = merge(&[ok(SourceKind::Snmp, snmp), ok(SourceKind::Ipp, ipp)]);
         assert_eq!(got.supplies, cmyk); // IPP's set, not SNMP's lone waste
     }
 
     #[test]
     fn jobs_prefer_cups_over_network() {
-        let cups = PrinterState { jobs: Some(3), ..Default::default() };
-        let ipp = PrinterState { jobs: Some(0), ..Default::default() };
+        let cups = PrinterState {
+            jobs: Some(3),
+            ..Default::default()
+        };
+        let ipp = PrinterState {
+            jobs: Some(0),
+            ..Default::default()
+        };
         let got = merge(&[ok(SourceKind::Ipp, ipp), ok(SourceKind::Cups, cups)]);
         assert_eq!(got.jobs, Some(3));
     }
 
     #[test]
     fn status_prefers_ipp() {
-        let ipp = PrinterState { status: Some(Status::Printing), ..Default::default() };
-        let snmp = PrinterState { status: Some(Status::Idle), ..Default::default() };
+        let ipp = PrinterState {
+            status: Some(Status::Printing),
+            ..Default::default()
+        };
+        let snmp = PrinterState {
+            status: Some(Status::Idle),
+            ..Default::default()
+        };
         let got = merge(&[ok(SourceKind::Snmp, snmp), ok(SourceKind::Ipp, ipp)]);
         assert_eq!(got.status, Some(Status::Printing));
     }
 
     #[test]
     fn reasons_ipp_primary_plus_snmp_additive_deduped() {
-        let ipp = PrinterState { reasons: vec![Reason::Jam], ..Default::default() };
+        let ipp = PrinterState {
+            reasons: vec![Reason::Jam],
+            ..Default::default()
+        };
         let snmp = PrinterState {
             reasons: vec![Reason::CoverOpen, Reason::Jam], // Jam dup, CoverOpen new
             ..Default::default()

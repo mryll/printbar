@@ -68,12 +68,15 @@ pub struct Thresholds {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ActionsCfg {
+    // on_click/on_click_right are consumed by the Waybar module config, not the binary.
+    #[allow(dead_code)]
     pub on_click: Option<String>,
+    #[allow(dead_code)]
     pub on_click_right: Option<String>,
     pub ews_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct NotifyCfg {
     #[serde(default)]
     pub enabled: bool,
@@ -119,12 +122,18 @@ fn default_critical() -> u8 {
 
 impl Default for SnmpCfg {
     fn default() -> Self {
-        Self { enabled: false, community: default_community() }
+        Self {
+            enabled: false,
+            community: default_community(),
+        }
     }
 }
 impl Default for BarCfg {
     fn default() -> Self {
-        Self { format: default_bar_format(), on_missing: OnMissing::default() }
+        Self {
+            format: default_bar_format(),
+            on_missing: OnMissing::default(),
+        }
     }
 }
 impl Default for TooltipCfg {
@@ -138,12 +147,10 @@ impl Default for TooltipCfg {
 }
 impl Default for Thresholds {
     fn default() -> Self {
-        Self { supply_low: default_low(), supply_critical: default_critical() }
-    }
-}
-impl Default for NotifyCfg {
-    fn default() -> Self {
-        Self { enabled: false, events: Vec::new() }
+        Self {
+            supply_low: default_low(),
+            supply_critical: default_critical(),
+        }
     }
 }
 

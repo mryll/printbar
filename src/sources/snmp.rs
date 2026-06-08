@@ -80,8 +80,8 @@ fn column<'a>(m: &'a OidMap, col: &str) -> Vec<(&'a str, &'a SnmpVal)> {
 
 fn map_class(class: Option<i64>, kind: SupplyKind) -> SupplyClass {
     match class {
-        Some(4) => SupplyClass::Filled,           // receptacleThatIsFilled
-        Some(3) => SupplyClass::Consumed,         // supplyThatIsConsumed
+        Some(4) => SupplyClass::Filled,   // receptacleThatIsFilled
+        Some(3) => SupplyClass::Consumed, // supplyThatIsConsumed
         _ if kind == SupplyKind::Waste => SupplyClass::Filled,
         _ => SupplyClass::Consumed,
     }
@@ -89,10 +89,10 @@ fn map_class(class: Option<i64>, kind: SupplyKind) -> SupplyClass {
 
 fn map_type(t: Option<i64>) -> SupplyKind {
     match t {
-        Some(3) | Some(21) => SupplyKind::Toner,        // toner, tonerCartridge
+        Some(3) | Some(21) => SupplyKind::Toner, // toner, tonerCartridge
         Some(4) | Some(8) | Some(14) | Some(32) => SupplyKind::Waste, // wasteToner/Ink/Wax/Paper
         Some(5) | Some(6) | Some(7) => SupplyKind::Ink, // ink, inkCartridge, inkRibbon
-        Some(9) => SupplyKind::Drum,                    // photoConductor
+        Some(9) => SupplyKind::Drum,             // photoConductor
         _ => SupplyKind::Other,
     }
 }
@@ -137,11 +137,15 @@ fn map_alert(desc: &str) -> Option<Reason> {
         Reason::Jam
     } else if l.contains("cover") || l.contains("door") {
         Reason::CoverOpen
-    } else if l.contains("empty") && (l.contains("paper") || l.contains("media") || l.contains("tray")) {
+    } else if l.contains("empty")
+        && (l.contains("paper") || l.contains("media") || l.contains("tray"))
+    {
         Reason::MediaEmpty
     } else if l.contains("empty") {
         Reason::SupplyEmpty
-    } else if l.contains("low") && (l.contains("toner") || l.contains("ink") || l.contains("supply")) {
+    } else if l.contains("low")
+        && (l.contains("toner") || l.contains("ink") || l.contains("supply"))
+    {
         Reason::SupplyLow
     } else if l.contains("offline") {
         Reason::Offline
@@ -161,7 +165,9 @@ pub fn parse_snmp(m: &OidMap) -> PrinterState {
         let maxcap = get(m, &format!("{SUP_MAXCAP}.{rk}")).and_then(as_int);
         let type_i = get(m, &format!("{SUP_TYPE}.{rk}")).and_then(as_int);
         let class_i = get(m, &format!("{SUP_CLASS}.{rk}")).and_then(as_int);
-        let desc = get(m, &format!("{SUP_DESC}.{rk}")).and_then(as_str).unwrap_or("");
+        let desc = get(m, &format!("{SUP_DESC}.{rk}"))
+            .and_then(as_str)
+            .unwrap_or("");
         let unit_i = get(m, &format!("{SUP_UNIT}.{rk}")).and_then(as_int);
         let kind = map_type(type_i);
 
@@ -173,14 +179,24 @@ pub fn parse_snmp(m: &OidMap) -> PrinterState {
             .and_then(as_str);
 
         supplies.push(Supply {
-            name: if desc.is_empty() { format!("Supply {rk}") } else { desc.to_string() },
+            name: if desc.is_empty() {
+                format!("Supply {rk}")
+            } else {
+                desc.to_string()
+            },
             kind,
             class: map_class(class_i, kind),
             color_raw: color_name.map(|s| s.to_string()),
             color: color_name.and_then(map_color),
             level: map_level(level_i, maxcap),
             max_capacity: maxcap.map(|v| v as i32),
-            unit: unit_i.map(|u| if u == 19 { SupplyUnit::Percent } else { SupplyUnit::Other }),
+            unit: unit_i.map(|u| {
+                if u == 19 {
+                    SupplyUnit::Percent
+                } else {
+                    SupplyUnit::Other
+                }
+            }),
         });
     }
 
@@ -197,9 +213,15 @@ pub fn parse_snmp(m: &OidMap) -> PrinterState {
     for (rk, lvl) in column(m, IN_LEVEL).into_iter().take(ROW_CAP) {
         let level_i = as_int(lvl).unwrap_or(-2);
         let maxcap = get(m, &format!("{IN_MAXCAP}.{rk}")).and_then(as_int);
-        let name = get(m, &format!("{IN_NAME}.{rk}")).and_then(as_str).unwrap_or("");
+        let name = get(m, &format!("{IN_NAME}.{rk}"))
+            .and_then(as_str)
+            .unwrap_or("");
         paper.push(InputTray {
-            name: if name.is_empty() { format!("Tray {rk}") } else { name.to_string() },
+            name: if name.is_empty() {
+                format!("Tray {rk}")
+            } else {
+                name.to_string()
+            },
             level: map_level(level_i, maxcap),
             max_capacity: maxcap.map(|v| v as i32),
             empty: level_i == 0,
@@ -212,7 +234,9 @@ pub fn parse_snmp(m: &OidMap) -> PrinterState {
         if !matches!(as_int(sev), Some(3) | Some(4)) {
             continue;
         }
-        let desc = get(m, &format!("{ALERT_DESC}.{rk}")).and_then(as_str).unwrap_or("");
+        let desc = get(m, &format!("{ALERT_DESC}.{rk}"))
+            .and_then(as_str)
+            .unwrap_or("");
         if let Some(reason) = map_alert(desc) {
             if !reasons.contains(&reason) {
                 reasons.push(reason);
@@ -220,15 +244,27 @@ pub fn parse_snmp(m: &OidMap) -> PrinterState {
         }
     }
 
-    let status = column(m, PRINTER_STATUS).into_iter().next().and_then(|(_, v)| {
-        match as_int(v) {
-            Some(3) | Some(5) => Some(Status::Idle), // idle / warmup
-            Some(4) => Some(Status::Printing),
-            _ => None,
-        }
-    });
+    let status = column(m, PRINTER_STATUS)
+        .into_iter()
+        .next()
+        .and_then(|(_, v)| {
+            match as_int(v) {
+                Some(3) | Some(5) => Some(Status::Idle), // idle / warmup
+                Some(4) => Some(Status::Printing),
+                _ => None,
+            }
+        });
 
-    PrinterState { name: None, model: None, status, reasons, supplies, paper, pages, jobs: None }
+    PrinterState {
+        name: None,
+        model: None,
+        status,
+        reasons,
+        supplies,
+        paper,
+        pages,
+        jobs: None,
+    }
 }
 
 // ---- thin snmp2 v2c walk adapter (network I/O; not unit-tested) ----
@@ -271,7 +307,9 @@ fn walk_all(host: &str, community: &str, timeout: std::time::Duration) -> Result
     fn snmp_val(v: &Value) -> Option<SnmpVal> {
         match v {
             Value::Integer(i) => Some(SnmpVal::Int(*i)),
-            Value::Counter32(u) | Value::Unsigned32(u) | Value::Timeticks(u) => Some(SnmpVal::Int(*u as i64)),
+            Value::Counter32(u) | Value::Unsigned32(u) | Value::Timeticks(u) => {
+                Some(SnmpVal::Int(*u as i64))
+            }
             Value::Counter64(u) => Some(SnmpVal::Int(*u as i64)),
             Value::OctetString(b) => Some(SnmpVal::Str(String::from_utf8_lossy(b).into_owned())),
             _ => None,
@@ -306,7 +344,10 @@ fn walk_all(host: &str, community: &str, timeout: std::time::Duration) -> Result
             if let Some(v) = sval {
                 map.insert(oid_s.clone(), v);
             }
-            cur = oid_s.split('.').filter_map(|p| p.parse::<u64>().ok()).collect();
+            cur = oid_s
+                .split('.')
+                .filter_map(|p| p.parse::<u64>().ok())
+                .collect();
             if cur.is_empty() {
                 break;
             }
@@ -320,7 +361,10 @@ mod tests {
     use super::*;
 
     fn m(pairs: &[(&str, SnmpVal)]) -> OidMap {
-        pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
     }
     fn i(x: i64) -> SnmpVal {
         SnmpVal::Int(x)
@@ -334,15 +378,15 @@ mod tests {
         // device 1, two supplies + colorant table + a waste receptacle.
         let map = m(&[
             // supply 1 = Black toner 54%
-            ("1.3.6.1.2.1.43.11.1.1.5.1.1", i(3)),   // type toner
-            ("1.3.6.1.2.1.43.11.1.1.4.1.1", i(3)),   // class consumed
+            ("1.3.6.1.2.1.43.11.1.1.5.1.1", i(3)), // type toner
+            ("1.3.6.1.2.1.43.11.1.1.4.1.1", i(3)), // class consumed
             ("1.3.6.1.2.1.43.11.1.1.6.1.1", s("Black Cartridge")),
             ("1.3.6.1.2.1.43.11.1.1.8.1.1", i(100)), // maxcap
             ("1.3.6.1.2.1.43.11.1.1.9.1.1", i(54)),  // level
             ("1.3.6.1.2.1.43.11.1.1.3.1.1", i(1)),   // colorant index 1
             // supply 2 = waste, receptacleThatIsFilled, level 20
-            ("1.3.6.1.2.1.43.11.1.1.5.1.2", i(4)),   // type wasteToner
-            ("1.3.6.1.2.1.43.11.1.1.4.1.2", i(4)),   // class filled
+            ("1.3.6.1.2.1.43.11.1.1.5.1.2", i(4)), // type wasteToner
+            ("1.3.6.1.2.1.43.11.1.1.4.1.2", i(4)), // class filled
             ("1.3.6.1.2.1.43.11.1.1.6.1.2", s("Waste Toner")),
             ("1.3.6.1.2.1.43.11.1.1.8.1.2", i(100)),
             ("1.3.6.1.2.1.43.11.1.1.9.1.2", i(20)),
@@ -392,7 +436,7 @@ mod tests {
             ("1.3.6.1.2.1.43.8.2.1.9.1.1", i(100)),
             ("1.3.6.1.2.1.43.8.2.1.13.1.1", s("Tray 2")),
             // active critical alert: paper jam
-            ("1.3.6.1.2.1.43.18.1.1.2.1", i(3)),         // severity critical
+            ("1.3.6.1.2.1.43.18.1.1.2.1", i(3)), // severity critical
             ("1.3.6.1.2.1.43.18.1.1.8.1", s("Paper jam in tray 2")),
             // a non-active (other=1) alert that must be ignored
             ("1.3.6.1.2.1.43.18.1.1.2.2", i(1)),

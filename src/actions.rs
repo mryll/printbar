@@ -14,7 +14,11 @@ pub fn ews_url(pc: &PrinterConfig) -> Result<String, String> {
     }
     // Bare IPv6 literal (has ':' but isn't host:port and isn't a v4 address) → bracket it.
     let looks_v6 = host.matches(':').count() >= 2 && !host.starts_with('[');
-    let h = if looks_v6 { format!("[{host}]") } else { host.to_string() };
+    let h = if looks_v6 {
+        format!("[{host}]")
+    } else {
+        host.to_string()
+    };
     Ok(format!("http://{h}"))
 }
 
@@ -71,6 +75,9 @@ mod tests {
     #[test]
     fn queue_uses_cups() {
         let p = pc("[printer.x]\nhost=\"h\"\ncups=\"HP_M477fdw\"\n");
-        assert_eq!(queue_url(&p).unwrap(), "http://localhost:631/printers/HP_M477fdw");
+        assert_eq!(
+            queue_url(&p).unwrap(),
+            "http://localhost:631/printers/HP_M477fdw"
+        );
     }
 }

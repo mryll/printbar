@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 mod actions;
 mod config;
 mod merge;
@@ -33,12 +32,16 @@ fn run() -> Result<(), String> {
 
     let name = args.get(1).ok_or("usage: printbar <printer-name>")?;
     let cfg = Config::load(&config_path())?;
-    let pc = cfg.for_printer(name).ok_or_else(|| format!("no [printer.{name}] in config"))?;
+    let pc = cfg
+        .for_printer(name)
+        .ok_or_else(|| format!("no [printer.{name}] in config"))?;
 
     let target = build_target(pc);
     let srcs = build_sources(pc);
     if srcs.is_empty() {
-        return Err(format!("printer '{name}' has neither host nor cups configured"));
+        return Err(format!(
+            "printer '{name}' has neither host nor cups configured"
+        ));
     }
     let outcomes = run_sources(&target, srcs);
     let state = merge::merge(&outcomes);
@@ -53,12 +56,17 @@ fn run_action(args: &[String]) -> Result<(), String> {
     let kind = args.get(2).ok_or("action: missing <ews|queue>")?;
     let name = flag_value(args, "--printer").ok_or("action: missing --printer <name>")?;
     let cfg = Config::load(&config_path())?;
-    let pc = cfg.for_printer(&name).ok_or_else(|| format!("no [printer.{name}] in config"))?;
+    let pc = cfg
+        .for_printer(&name)
+        .ok_or_else(|| format!("no [printer.{name}] in config"))?;
     actions::run(kind, pc)
 }
 
 fn flag_value(args: &[String], flag: &str) -> Option<String> {
-    args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned()
+    args.iter()
+        .position(|a| a == flag)
+        .and_then(|i| args.get(i + 1))
+        .cloned()
 }
 
 fn build_target(pc: &PrinterConfig) -> Target {
@@ -75,10 +83,14 @@ fn build_target(pc: &PrinterConfig) -> Target {
 fn build_sources(pc: &PrinterConfig) -> Vec<Box<dyn Source>> {
     let mut v: Vec<Box<dyn Source>> = Vec::new();
     if pc.host.is_some() {
-        v.push(Box::new(IppSource { kind: SourceKind::Ipp }));
+        v.push(Box::new(IppSource {
+            kind: SourceKind::Ipp,
+        }));
     }
     if pc.cups.is_some() {
-        v.push(Box::new(IppSource { kind: SourceKind::Cups }));
+        v.push(Box::new(IppSource {
+            kind: SourceKind::Cups,
+        }));
     }
     if pc.snmp.enabled && pc.host.is_some() {
         v.push(Box::new(SnmpSource));

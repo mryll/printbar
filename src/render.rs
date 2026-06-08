@@ -4,18 +4,20 @@
 use crate::config::{OnMissing, PrinterConfig};
 use crate::model::{Level, PrinterState, Reason, Status, Supply, SupplyClass};
 use crate::theme::ThemeColors;
-use crate::waybar::{bold_fg, bottom_border, fg, pango_escape, separator, top_border, visible_len, WaybarOutput};
+use crate::waybar::{
+    bold_fg, bottom_border, fg, pango_escape, separator, top_border, visible_len, WaybarOutput,
+};
 
 const HIDDEN: char = '\u{0}'; // marker for a hidden token; words containing it are dropped
 
 pub fn status_icon(s: Option<&Status>) -> &'static str {
     // Nerd Font (FontAwesome) glyphs via escapes so they persist in source.
     match s {
-        Some(Status::Idle) => "\u{f02f}",      // printer
-        Some(Status::Printing) => "\u{f02f}",  // printer (active)
-        Some(Status::Stopped) => "\u{f071}",   // warning triangle
-        Some(Status::Offline) => "\u{f127}",   // broken link
-        _ => "\u{f059}",                       // question circle
+        Some(Status::Idle) => "\u{f02f}",     // printer
+        Some(Status::Printing) => "\u{f02f}", // printer (active)
+        Some(Status::Stopped) => "\u{f071}",  // warning triangle
+        Some(Status::Offline) => "\u{f127}",  // broken link
+        _ => "\u{f059}",                      // question circle
     }
 }
 
@@ -32,8 +34,8 @@ fn status_text(s: Option<&Status>) -> &'static str {
 /// Effective "badness" percent for a supply: how close to empty (Consumed) or full (Filled).
 fn supply_badness(s: &Supply) -> Option<u8> {
     s.level.as_pct().map(|p| match s.class {
-        SupplyClass::Consumed => p,        // low = bad
-        SupplyClass::Filled => 100 - p,    // high = bad → invert to headroom
+        SupplyClass::Consumed => p,     // low = bad
+        SupplyClass::Filled => 100 - p, // high = bad → invert to headroom
     })
 }
 
@@ -45,25 +47,47 @@ fn worst_supply_badness(state: &PrinterState) -> Option<u8> {
 fn resolve(token: &str, state: &PrinterState) -> Option<String> {
     use crate::model::{Color, SupplyKind};
     let color_pct = |c: Color| {
-        state.supplies.iter().find(|s| s.color == Some(c)).and_then(|s| s.level.as_pct())
+        state
+            .supplies
+            .iter()
+            .find(|s| s.color == Some(c))
+            .and_then(|s| s.level.as_pct())
     };
     match token {
         "supply_min" => worst_supply_badness(state).map(|p| p.to_string()),
-        "toner_min" => state.supplies.iter().filter(|s| s.kind == SupplyKind::Toner)
-            .filter_map(supply_badness).min().map(|p| p.to_string()),
-        "ink_min" => state.supplies.iter().filter(|s| s.kind == SupplyKind::Ink)
-            .filter_map(supply_badness).min().map(|p| p.to_string()),
+        "toner_min" => state
+            .supplies
+            .iter()
+            .filter(|s| s.kind == SupplyKind::Toner)
+            .filter_map(supply_badness)
+            .min()
+            .map(|p| p.to_string()),
+        "ink_min" => state
+            .supplies
+            .iter()
+            .filter(|s| s.kind == SupplyKind::Ink)
+            .filter_map(supply_badness)
+            .min()
+            .map(|p| p.to_string()),
         "black" => color_pct(Color::Black).map(|p| p.to_string()),
         "cyan" => color_pct(Color::Cyan).map(|p| p.to_string()),
         "magenta" => color_pct(Color::Magenta).map(|p| p.to_string()),
         "yellow" => color_pct(Color::Yellow).map(|p| p.to_string()),
-        "status" => state.status.as_ref().map(|_| status_text(state.status.as_ref()).to_string()),
+        "status" => state
+            .status
+            .as_ref()
+            .map(|_| status_text(state.status.as_ref()).to_string()),
         "status_icon" => Some(status_icon(state.status.as_ref()).to_string()), // always present
         "model" => state.model.clone(),
         "name" => state.name.clone(),
         "jobs" => state.jobs.map(|j| j.to_string()),
         "pages" => state.pages.map(|p| p.to_string()),
-        "paper" => state.paper.iter().filter_map(|t| t.level.as_pct()).min().map(|p| p.to_string()),
+        "paper" => state
+            .paper
+            .iter()
+            .filter_map(|t| t.level.as_pct())
+            .min()
+            .map(|p| p.to_string()),
         _ => None,
     }
 }
@@ -161,7 +185,7 @@ fn level_str(l: Level) -> String {
 fn supply_bar(s: &Supply) -> String {
     match s.level.as_pct() {
         Some(p) => {
-            let filled = (p as usize + 19) / 20; // 0..=5 cells
+            let filled = (p as usize).div_ceil(20); // 0..=5 cells
             let cells: String = (0..5).map(|i| if i < filled { '▰' } else { '▱' }).collect();
             format!("{cells} {p}%")
         }
@@ -192,19 +216,23 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors) -> 
                     rows.push(format!("{} {}", label("Model"), fg(&t.error, "n/d")));
                 }
             }
-            "status" => {
-                if state.status.is_some() {
-                    rows.push(format!("{} {}", label("Status"),
-                        fg(&t.text, status_text(state.status.as_ref()))));
-                }
+            "status" if state.status.is_some() => {
+                rows.push(format!(
+                    "{} {}",
+                    label("Status"),
+                    fg(&t.text, status_text(state.status.as_ref()))
+                ));
             }
             "supplies" => {
                 let cap = cfg.tooltip.max_rows.max(1);
                 let total = state.supplies.len();
                 for s in state.supplies.iter().take(cap) {
                     let name = pango_escape(&s.name);
-                    rows.push(format!("{}  {}", fg(&t.text, &name),
-                        fg(supply_color(s, cfg, t), &supply_bar(s))));
+                    rows.push(format!(
+                        "{}  {}",
+                        fg(&t.text, &name),
+                        fg(supply_color(s, cfg, t), &supply_bar(s))
+                    ));
                 }
                 if total > cap {
                     rows.push(fg(&t.dim, &format!("+{} more", total - cap)));
@@ -212,8 +240,11 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors) -> 
             }
             "paper" => {
                 for tray in &state.paper {
-                    rows.push(format!("{} {}", label(&pango_escape(&tray.name)),
-                        fg(&t.text, &level_str(tray.level))));
+                    rows.push(format!(
+                        "{} {}",
+                        label(&pango_escape(&tray.name)),
+                        fg(&t.text, &level_str(tray.level))
+                    ));
                 }
             }
             "jobs" => {
@@ -223,7 +254,11 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors) -> 
             }
             "pages" => {
                 if let Some(p) = state.pages {
-                    rows.push(format!("{} {}", label("Pages"), fg(&t.text, &p.to_string())));
+                    rows.push(format!(
+                        "{} {}",
+                        label("Pages"),
+                        fg(&t.text, &p.to_string())
+                    ));
                 }
             }
             _ => {}
@@ -233,11 +268,20 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors) -> 
         rows.push(fg(&t.dim, "no data"));
     }
 
-    let width = rows.iter().map(|r| visible_len(r)).max().unwrap_or(0).max(12);
+    let width = rows
+        .iter()
+        .map(|r| visible_len(r))
+        .max()
+        .unwrap_or(0)
+        .max(12);
     let mut out = vec![top_border(width, &t.border)];
     for r in &rows {
         let pad = " ".repeat(width.saturating_sub(visible_len(r)));
-        out.push(format!("{} {r}{pad} {}", fg(&t.border, "│"), fg(&t.border, "│")));
+        out.push(format!(
+            "{} {r}{pad} {}",
+            fg(&t.border, "│"),
+            fg(&t.border, "│")
+        ));
     }
     let _ = separator; // available for future grouping
     out.push(bottom_border(width, &t.border));
@@ -261,16 +305,31 @@ mod tests {
     use crate::model::{Color, SupplyKind};
 
     fn cfg() -> PrinterConfig {
-        crate::config::Config::parse("[printer.x]\n").unwrap().printer.remove("x").unwrap()
+        crate::config::Config::parse("[printer.x]\n")
+            .unwrap()
+            .printer
+            .remove("x")
+            .unwrap()
     }
     fn consumed(name: &str, color: Color, pct: u8) -> Supply {
-        Supply { name: name.into(), kind: SupplyKind::Toner, class: SupplyClass::Consumed,
-            color_raw: None, color: Some(color), level: Level::Pct(pct), max_capacity: None, unit: None }
+        Supply {
+            name: name.into(),
+            kind: SupplyKind::Toner,
+            class: SupplyClass::Consumed,
+            color_raw: None,
+            color: Some(color),
+            level: Level::Pct(pct),
+            max_capacity: None,
+            unit: None,
+        }
     }
 
     #[test]
     fn token_substitution_basic() {
-        let mut st = PrinterState { status: Some(Status::Idle), ..Default::default() };
+        let mut st = PrinterState {
+            status: Some(Status::Idle),
+            ..Default::default()
+        };
         st.supplies.push(consumed("Black", Color::Black, 54));
         let (text, _) = render_template("🖨 {supply_min}% {status_icon}", &st, OnMissing::Hide);
         assert_eq!(text, format!("🖨 54% {}", status_icon(Some(&Status::Idle))));
@@ -298,13 +357,22 @@ mod tests {
         c.thresholds.supply_low = 15;
         c.thresholds.supply_critical = 5;
         let mut consumed_low = PrinterState::default();
-        consumed_low.supplies.push(consumed("Black", Color::Black, 4));
+        consumed_low
+            .supplies
+            .push(consumed("Black", Color::Black, 4));
         assert_eq!(worst_class(&consumed_low, &c, false), "critical");
 
         let mut filled_high = PrinterState::default();
         filled_high.supplies.push(Supply {
-            name: "Waste".into(), kind: SupplyKind::Waste, class: SupplyClass::Filled,
-            color_raw: None, color: None, level: Level::Pct(96), max_capacity: None, unit: None });
+            name: "Waste".into(),
+            kind: SupplyKind::Waste,
+            class: SupplyClass::Filled,
+            color_raw: None,
+            color: None,
+            level: Level::Pct(96),
+            max_capacity: None,
+            unit: None,
+        });
         assert_eq!(worst_class(&filled_high, &c, false), "critical"); // headroom 4 <= 5
     }
 
@@ -316,7 +384,8 @@ mod tests {
         c.tooltip.max_rows = 12;
         let mut st = PrinterState::default();
         for i in 0..20 {
-            st.supplies.push(consumed(&format!("S{i}"), Color::Other, 50));
+            st.supplies
+                .push(consumed(&format!("S{i}"), Color::Other, 50));
         }
         let tip = build_tooltip(&st, &c, &t);
         assert!(tip.contains("+8 more"));

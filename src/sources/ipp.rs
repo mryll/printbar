@@ -5,9 +5,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use crate::model::{
-    Color, Level, PrinterState, Reason, Status, Supply, SupplyClass, SupplyKind,
-};
+use crate::model::{Color, Level, PrinterState, Reason, Status, Supply, SupplyClass, SupplyKind};
 use crate::sources::{Source, SourceKind, SourceOutcome, Target};
 
 /// Minimal value model — what we extract from IPP attributes.
@@ -21,12 +19,32 @@ pub type AttrMap = HashMap<String, Vec<AttrVal>>;
 
 fn ints(m: &AttrMap, key: &str) -> Vec<i64> {
     m.get(key)
-        .map(|v| v.iter().filter_map(|x| if let AttrVal::Int(i) = x { Some(*i) } else { None }).collect())
+        .map(|v| {
+            v.iter()
+                .filter_map(|x| {
+                    if let AttrVal::Int(i) = x {
+                        Some(*i)
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        })
         .unwrap_or_default()
 }
 fn strs<'a>(m: &'a AttrMap, key: &str) -> Vec<&'a str> {
     m.get(key)
-        .map(|v| v.iter().filter_map(|x| if let AttrVal::Str(s) = x { Some(s.as_str()) } else { None }).collect())
+        .map(|v| {
+            v.iter()
+                .filter_map(|x| {
+                    if let AttrVal::Str(s) = x {
+                        Some(s.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        })
         .unwrap_or_default()
 }
 fn first_int(m: &AttrMap, key: &str) -> Option<i64> {
@@ -55,17 +73,29 @@ fn map_reason(raw: &str) -> Option<Reason> {
     }
     let r = if base.contains("jam") {
         Reason::Jam
-    } else if base.contains("cover-open") || base.contains("door-open") || base.contains("interlock") {
+    } else if base.contains("cover-open")
+        || base.contains("door-open")
+        || base.contains("interlock")
+    {
         Reason::CoverOpen
     } else if base.contains("media-low") || base.contains("input-media-supply-low") {
         Reason::MediaLow
-    } else if base.contains("media-empty") || base.contains("media-needed") || base.contains("input-tray-missing") {
+    } else if base.contains("media-empty")
+        || base.contains("media-needed")
+        || base.contains("input-tray-missing")
+    {
         Reason::MediaEmpty
-    } else if base.contains("waste") && base.contains("full") {
+    } else if (base.contains("waste") && base.contains("full"))
+        || base.contains("toner-empty")
+        || base.contains("marker-supply-empty")
+        || base.contains("developer-empty")
+    {
         Reason::SupplyEmpty
-    } else if base.contains("toner-empty") || base.contains("marker-supply-empty") || base.contains("developer-empty") {
-        Reason::SupplyEmpty
-    } else if base.contains("toner-low") || base.contains("marker-supply-low") || base.contains("developer-low") || base.contains("waste") {
+    } else if base.contains("toner-low")
+        || base.contains("marker-supply-low")
+        || base.contains("developer-low")
+        || base.contains("waste")
+    {
         Reason::SupplyLow
     } else if base.contains("offline") || base.contains("shutdown") {
         Reason::Offline
@@ -83,7 +113,11 @@ fn map_kind(t: &str) -> SupplyKind {
         SupplyKind::Toner
     } else if l.contains("ink") {
         SupplyKind::Ink
-    } else if l.contains("opc") || l.contains("drum") || l.contains("photoconductor") || l.contains("imaging") {
+    } else if l.contains("opc")
+        || l.contains("drum")
+        || l.contains("photoconductor")
+        || l.contains("imaging")
+    {
         SupplyKind::Drum
     } else {
         SupplyKind::Other
@@ -125,9 +159,16 @@ pub fn parse_attrs(m: &AttrMap) -> PrinterState {
     for i in 0..n {
         let type_s = types.get(i).copied().unwrap_or("");
         let kind = map_kind(type_s);
-        let class = if kind == SupplyKind::Waste { SupplyClass::Filled } else { SupplyClass::Consumed };
+        let class = if kind == SupplyKind::Waste {
+            SupplyClass::Filled
+        } else {
+            SupplyClass::Consumed
+        };
         supplies.push(Supply {
-            name: names.get(i).map(|s| s.to_string()).unwrap_or_else(|| format!("Supply {}", i + 1)),
+            name: names
+                .get(i)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("Supply {}", i + 1)),
             kind,
             class,
             color_raw: colors.get(i).map(|s| s.to_string()),
@@ -178,7 +219,11 @@ impl Source for IppSource {
                 "ipp://localhost:631/printers/{}",
                 target.cups.as_deref().unwrap_or("")
             ),
-            _ => format!("ipp://{}{}", target.host.as_deref().unwrap_or(""), target.ipp_path),
+            _ => format!(
+                "ipp://{}{}",
+                target.host.as_deref().unwrap_or(""),
+                target.ipp_path
+            ),
         };
         match query(&uri, target.timeout) {
             Ok(map) => SourceOutcome {
@@ -220,7 +265,9 @@ fn query(uri_str: &str, timeout: Duration) -> Result<AttrMap, String> {
         m
     }
 
-    let uri: Uri = uri_str.parse().map_err(|e| format!("bad uri {uri_str}: {e}"))?;
+    let uri: Uri = uri_str
+        .parse()
+        .map_err(|e| format!("bad uri {uri_str}: {e}"))?;
     let op = IppOperationBuilder::get_printer_attributes(uri.clone())
         .build()
         .map_err(|e| format!("build op: {e}"))?;
@@ -242,7 +289,10 @@ mod tests {
     use super::*;
 
     fn m(pairs: &[(&str, Vec<AttrVal>)]) -> AttrMap {
-        pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
     }
     fn s(x: &str) -> AttrVal {
         AttrVal::Str(x.into())
@@ -256,12 +306,29 @@ mod tests {
         let map = m(&[
             ("printer-state", vec![i(3)]),
             ("printer-state-reasons", vec![s("none")]),
-            ("marker-names", vec![s("Black Cartridge"), s("Cyan Cartridge"), s("Magenta Cartridge"), s("Yellow Cartridge")]),
-            ("marker-colors", vec![s("#000000"), s("#00FFFF"), s("#FF00FF"), s("#FFFF00")]),
+            (
+                "marker-names",
+                vec![
+                    s("Black Cartridge"),
+                    s("Cyan Cartridge"),
+                    s("Magenta Cartridge"),
+                    s("Yellow Cartridge"),
+                ],
+            ),
+            (
+                "marker-colors",
+                vec![s("#000000"), s("#00FFFF"), s("#FF00FF"), s("#FFFF00")],
+            ),
             ("marker-levels", vec![i(73), i(54), i(81), i(69)]),
-            ("marker-types", vec![s("toner"), s("toner"), s("toner"), s("toner")]),
+            (
+                "marker-types",
+                vec![s("toner"), s("toner"), s("toner"), s("toner")],
+            ),
             ("queued-job-count", vec![i(0)]),
-            ("printer-make-and-model", vec![s("HP Color LaserJet MFP M477fdw")]),
+            (
+                "printer-make-and-model",
+                vec![s("HP Color LaserJet MFP M477fdw")],
+            ),
         ]);
         let st = parse_attrs(&map);
         assert_eq!(st.status, Some(Status::Idle));
@@ -307,7 +374,10 @@ mod tests {
     fn sentinels_and_reasons() {
         let map = m(&[
             ("printer-state", vec![i(5)]),
-            ("printer-state-reasons", vec![s("media-jam"), s("toner-low-warning"), s("none")]),
+            (
+                "printer-state-reasons",
+                vec![s("media-jam"), s("toner-low-warning"), s("none")],
+            ),
             ("marker-names", vec![s("Black")]),
             ("marker-levels", vec![i(-2)]),
             ("marker-types", vec![s("toner")]),

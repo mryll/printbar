@@ -21,13 +21,19 @@ pub enum SourceKind {
 pub struct SourceOutcome {
     pub kind: SourceKind,
     pub partial: PartialPrinter,
+    #[allow(dead_code)] // reserved for diagnostics/logging
     pub duration: Duration,
     pub error: Option<String>,
 }
 
 impl SourceOutcome {
     pub fn failed(kind: SourceKind, error: impl Into<String>, duration: Duration) -> Self {
-        Self { kind, partial: PartialPrinter::default(), duration, error: Some(error.into()) }
+        Self {
+            kind,
+            partial: PartialPrinter::default(),
+            duration,
+            error: Some(error.into()),
+        }
     }
 }
 
@@ -104,9 +110,16 @@ mod tests {
         }
         fn collect(&self, _t: &Target) -> SourceOutcome {
             std::thread::sleep(self.sleep);
-            let mut partial = PartialPrinter::default();
-            partial.jobs = self.jobs;
-            SourceOutcome { kind: self.kind, partial, duration: self.sleep, error: None }
+            let partial = PartialPrinter {
+                jobs: self.jobs,
+                ..Default::default()
+            };
+            SourceOutcome {
+                kind: self.kind,
+                partial,
+                duration: self.sleep,
+                error: None,
+            }
         }
     }
 
@@ -123,12 +136,23 @@ mod tests {
 
     #[test]
     fn slow_source_times_out_without_hanging() {
-        let fast: Box<dyn Source> = Box::new(Fake { kind: SourceKind::Ipp, sleep: Duration::ZERO, jobs: Some(2) });
-        let slow: Box<dyn Source> = Box::new(Fake { kind: SourceKind::Snmp, sleep: Duration::from_secs(5), jobs: Some(9) });
+        let fast: Box<dyn Source> = Box::new(Fake {
+            kind: SourceKind::Ipp,
+            sleep: Duration::ZERO,
+            jobs: Some(2),
+        });
+        let slow: Box<dyn Source> = Box::new(Fake {
+            kind: SourceKind::Snmp,
+            sleep: Duration::from_secs(5),
+            jobs: Some(9),
+        });
         let start = Instant::now();
         let outs = run_sources(&target(), vec![fast, slow]);
         let elapsed = start.elapsed();
-        assert!(elapsed < Duration::from_secs(2), "should not wait for the slow source: {elapsed:?}");
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "should not wait for the slow source: {elapsed:?}"
+        );
         let ipp = outs.iter().find(|o| o.kind == SourceKind::Ipp).unwrap();
         let snmp = outs.iter().find(|o| o.kind == SourceKind::Snmp).unwrap();
         assert!(ipp.error.is_none());
