@@ -197,6 +197,7 @@ pub fn parse_attrs(m: &AttrMap) -> PrinterState {
         paper: Vec::new(),
         pages: None,
         jobs: first_int(m, "queued-job-count").map(|j| j.max(0) as u32),
+        display: None,
     }
 }
 

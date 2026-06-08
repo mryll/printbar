@@ -105,10 +105,12 @@ fn default_bar_format() -> String {
     "🖨 {supply_min}% {status_icon}".into()
 }
 fn default_tooltip_items() -> Vec<String> {
-    ["model", "status", "supplies", "paper", "jobs", "pages"]
-        .iter()
-        .map(|s| s.to_string())
-        .collect()
+    [
+        "model", "status", "alerts", "display", "supplies", "paper", "jobs", "pages",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
 }
 fn default_max_rows() -> usize {
     12

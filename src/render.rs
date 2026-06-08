@@ -31,6 +31,20 @@ fn status_text(s: Option<&Status>) -> &'static str {
     }
 }
 
+/// Human label + theme color for an active condition.
+fn reason_display<'a>(r: &Reason, t: &'a ThemeColors) -> (String, &'a str) {
+    match r {
+        Reason::Jam => ("Paper jam".into(), &t.error),
+        Reason::MediaEmpty => ("Out of paper".into(), &t.error),
+        Reason::MediaLow => ("Paper low".into(), &t.orange),
+        Reason::SupplyLow => ("Supply low".into(), &t.orange),
+        Reason::SupplyEmpty => ("Supply empty".into(), &t.error),
+        Reason::CoverOpen => ("Cover open".into(), &t.error),
+        Reason::Offline => ("Offline".into(), &t.dim),
+        Reason::Other(s) => (s.clone(), &t.orange),
+    }
+}
+
 /// Effective "badness" percent for a supply: how close to empty (Consumed) or full (Filled).
 fn supply_badness(s: &Supply) -> Option<u8> {
     s.level.as_pct().map(|p| match s.class {
@@ -222,6 +236,24 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors) -> 
                     label("Status"),
                     fg(&t.text, status_text(state.status.as_ref()))
                 ));
+            }
+            // The literal text shown on the printer's front panel (e.g. "Sleep mode is on.",
+            // "Paper jam in tray 2"). This is where the printer's own messages surface.
+            "display" => {
+                if let Some(d) = &state.display {
+                    rows.push(format!(
+                        "{} {}",
+                        label("Panel"),
+                        fg(&t.accent, &pango_escape(d))
+                    ));
+                }
+            }
+            // Active conditions (jam, cover open, toner low, ...), colored by severity.
+            "alerts" => {
+                for r in &state.reasons {
+                    let (txt, color) = reason_display(r, t);
+                    rows.push(fg(color, &format!("\u{26a0} {}", pango_escape(&txt))));
+                }
             }
             "supplies" => {
                 let cap = cfg.tooltip.max_rows.max(1);

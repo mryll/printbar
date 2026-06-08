@@ -120,6 +120,8 @@ pub struct PrinterState {
     pub paper: Vec<InputTray>,
     pub pages: Option<u64>,
     pub jobs: Option<u32>,
+    /// The literal text on the printer's front-panel display (SNMP console buffer).
+    pub display: Option<String>,
 }
 
 #[cfg(test)]

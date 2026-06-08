@@ -36,6 +36,7 @@ const IN_NAME: &str = "1.3.6.1.2.1.43.8.2.1.13";
 const ALERT_SEVERITY: &str = "1.3.6.1.2.1.43.18.1.1.2";
 const ALERT_DESC: &str = "1.3.6.1.2.1.43.18.1.1.8";
 const PRINTER_STATUS: &str = "1.3.6.1.2.1.25.3.5.1.1"; // hrPrinterStatus
+const CONSOLE_TEXT: &str = "1.3.6.1.2.1.43.16.5.1.2"; // prtConsoleDisplayBufferText
 
 // Subtrees to walk (base OID + numeric components for getnext).
 const WALK_BASES: &[(&str, &[u64])] = &[
@@ -45,6 +46,8 @@ const WALK_BASES: &[(&str, &[u64])] = &[
     ("1.3.6.1.2.1.43.8.2.1", &[1, 3, 6, 1, 2, 1, 43, 8, 2, 1]),
     ("1.3.6.1.2.1.43.18.1.1", &[1, 3, 6, 1, 2, 1, 43, 18, 1, 1]),
     (PRINTER_STATUS, &[1, 3, 6, 1, 2, 1, 25, 3, 5, 1, 1]),
+    // NOTE: prtConsoleDisplayBufferText is fetched via direct GET, not here — many agents
+    // (e.g. HP) skip the console table on getnext, so a walk never reaches it.
 ];
 
 const ROW_CAP: usize = 64;
@@ -259,6 +262,19 @@ pub fn parse_snmp(m: &OidMap) -> PrinterState {
             }
         });
 
+    // Front-panel display text: join non-empty console buffer lines (in row order).
+    let lines: Vec<String> = column(m, CONSOLE_TEXT)
+        .into_iter()
+        .filter_map(|(_, v)| as_str(v))
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let display = if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join(" "))
+    };
+
     PrinterState {
         name: None,
         model: None,
@@ -268,6 +284,7 @@ pub fn parse_snmp(m: &OidMap) -> PrinterState {
         paper,
         pages,
         jobs: None,
+        display,
     }
 }
 
@@ -380,6 +397,31 @@ fn walk_all(host: &str, community: &str, timeout: std::time::Duration) -> Result
             cur = next;
         }
     }
+
+    // Console display text via direct GET (device 1, lines 1..=6). Walks miss it on agents
+    // that skip the console table on getnext; a direct GET works on any standard agent.
+    if transport_ok {
+        for line in 1..=6u64 {
+            let comps = [1u64, 3, 6, 1, 2, 1, 43, 16, 5, 1, 2, 1, line];
+            let oid = match Oid::from(&comps) {
+                Ok(o) => o,
+                Err(_) => break,
+            };
+            let pdu = match sess.get(&oid) {
+                Ok(p) => p,
+                Err(_) => break, // transport error ⇒ stop probing
+            };
+            if let Some((roid, val)) = pdu.varbinds.clone().next() {
+                let oid_s = roid.to_id_string();
+                if let Some(SnmpVal::Str(s)) = snmp_val(&val) {
+                    if !s.trim().is_empty() && oid_s.starts_with(&format!("{CONSOLE_TEXT}.")) {
+                        map.insert(oid_s, SnmpVal::Str(s));
+                    }
+                }
+            }
+        }
+    }
+
     if map.is_empty() {
         return Err("snmp: no data".into());
     }

@@ -45,6 +45,9 @@ pub fn merge(outcomes: &[SourceOutcome]) -> PrinterState {
             if state.name.is_none() && p.name.is_some() {
                 state.name = p.name.clone();
             }
+            if state.display.is_none() && p.display.is_some() {
+                state.display = p.display.clone();
+            }
         }
     }
     for k in STATUS_PRIORITY {
