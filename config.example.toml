@@ -12,7 +12,9 @@ enabled = true               # explicit; community alone does NOT enable SNMP
 community = "public"
 
 [printer.oficina.bar]
-format = "🖨 {supply_min}% {status_icon}"
+# \U000f042a is the Nerd Font printer glyph (aligns with the bar font). Prefer it over a
+# color emoji like 🖨, which renders slightly misaligned in the bar.
+format = "\U000f042a {supply_min}%"
 on_missing = "hide"          # "hide" | "error"
 
 [printer.oficina.tooltip]

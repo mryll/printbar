@@ -102,7 +102,9 @@ fn default_community() -> String {
     "public".into()
 }
 fn default_bar_format() -> String {
-    "🖨 {supply_min}% {status_icon}".into()
+    // Nerd Font printer glyph (nf-md-printer) — shares the bar font's baseline, unlike a
+    // color emoji which renders misaligned.
+    "\u{f042a} {supply_min}%".into()
 }
 fn default_tooltip_items() -> Vec<String> {
     [

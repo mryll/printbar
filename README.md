@@ -5,21 +5,14 @@
 
 A generic printer monitor for [Waybar](https://github.com/Alexays/Waybar): status, supply levels, trays, jobs and the printer's own panel messages — for **any** printer, over the network or USB, with no vendor lock-in.
 
-```text
-🖨 53%            ╭───────────────────────────────╮
-                  │ HP Color LaserJet MFP M477fdw │
-                  │ ───────────────────────────── │
-                  │ ● Idle                        │
-                  │ Panel Ready                   │
-                  │ ● Black    ▰▰▰▱▱  53%          │
-                  │ ● Cyan     ▰▰▰▰▱  69%          │
-                  │ ● Magenta  ▰▰▰▰▰  81%          │
-                  │ ● Yellow   ▰▰▰▰▱  73%          │
-                  │ Tray 2 ok                     │
-                  │ Jobs 0                        │
-                  │ Impressions 165               │
-                  ╰───────────────────────────────╯
-```
+<p align="center">
+  <img src="screenshots/bar.png" alt="printbar in Waybar" width="800">
+</p>
+
+<p align="center">
+  <em>A compact line in your bar — hover for the full, themed panel:</em><br><br>
+  <img src="screenshots/tooltip-simple.png" alt="printbar tooltip" width="800">
+</p>
 
 ## Why printbar?
 
@@ -107,7 +100,7 @@ A hidden token (when its data is absent and `on_missing = "hide"`) takes any adj
 
 ```toml
 [printer.office.bar]
-format = "🖨 {supply_min}%"
+format = "\U000f042a {supply_min}%"   # \U000f042a = Nerd Font printer glyph (aligns better than an emoji)
 on_missing = "hide"          # "hide" | "error"
 ```
 
@@ -138,6 +131,14 @@ supply_critical = 5
 ```
 
 Tooltip colors come from your Omarchy theme (`~/.config/omarchy/current/theme/colors.toml`) with a sensible fallback.
+
+### Themes
+
+The tooltip follows your active Omarchy theme:
+
+| Gruvbox | Catppuccin Latte | Everforest |
+| --- | --- | --- |
+| ![Gruvbox](screenshots/theme-gruvbox.png) | ![Catppuccin Latte](screenshots/theme-catppuccin-latte.png) | ![Everforest](screenshots/theme-everforest.png) |
 
 ### Click actions and notifications
 
