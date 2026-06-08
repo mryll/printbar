@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use config::{Config, PrinterConfig};
 use sources::ipp::IppSource;
+use sources::snmp::SnmpSource;
 use sources::{run_sources, Source, SourceKind, Target};
 
 fn main() {
@@ -77,7 +78,9 @@ fn build_sources(pc: &PrinterConfig) -> Vec<Box<dyn Source>> {
     if pc.cups.is_some() {
         v.push(Box::new(IppSource { kind: SourceKind::Cups }));
     }
-    // SNMP source added in Task 9.
+    if pc.snmp.enabled && pc.host.is_some() {
+        v.push(Box::new(SnmpSource));
+    }
     v
 }
 
