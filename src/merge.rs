@@ -66,7 +66,7 @@ pub fn merge(outcomes: &[SourceOutcome]) -> PrinterState {
     // Reasons: IPP/CUPS primary (union), then SNMP additive (already pre-filtered by the
     // SNMP source to active + critical/warning). Dedupe, preserve first-seen order.
     let mut reasons: Vec<Reason> = Vec::new();
-    let mut push = |src: &[Reason], out: &mut Vec<Reason>| {
+    let push = |src: &[Reason], out: &mut Vec<Reason>| {
         for r in src {
             if !out.contains(r) {
                 out.push(r.clone());
