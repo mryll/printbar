@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 mod config;
+mod merge;
 mod model;
+mod sources;
 mod theme;
 mod waybar;
 
