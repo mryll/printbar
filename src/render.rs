@@ -239,12 +239,17 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors) -> 
                 }
             }
             "paper" => {
-                for tray in &state.paper {
+                let cap = cfg.tooltip.max_rows.max(1);
+                let total = state.paper.len();
+                for tray in state.paper.iter().take(cap) {
                     rows.push(format!(
                         "{} {}",
                         label(&pango_escape(&tray.name)),
                         fg(&t.text, &level_str(tray.level))
                     ));
+                }
+                if total > cap {
+                    rows.push(fg(&t.dim, &format!("+{} more", total - cap)));
                 }
             }
             "jobs" => {

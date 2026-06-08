@@ -76,7 +76,8 @@ fn build_target(pc: &PrinterConfig) -> Target {
         cups: pc.cups.clone(),
         snmp_enabled: pc.snmp.enabled,
         community: pc.snmp.community.clone(),
-        timeout: Duration::from_secs(pc.timeout),
+        // Clamp to a sane range so a huge config value can't overflow `Instant + Duration`.
+        timeout: Duration::from_secs(pc.timeout.clamp(1, 60)),
     }
 }
 

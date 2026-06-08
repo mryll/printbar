@@ -48,6 +48,10 @@ const WALK_BASES: &[(&str, &[u64])] = &[
 ];
 
 const ROW_CAP: usize = 64;
+/// Max varbinds to fetch per subtree walk. Must be comfortably above
+/// ROW_CAP * (columns-before-the-last-used-one) so a multi-column table never truncates
+/// before reaching its level column.
+const WALK_VARBIND_CAP: usize = 2048;
 
 fn as_int(v: &SnmpVal) -> Option<i64> {
     if let SnmpVal::Int(i) = v {
@@ -300,7 +304,13 @@ impl Source for SnmpSource {
 fn walk_all(host: &str, community: &str, timeout: std::time::Duration) -> Result<OidMap, String> {
     use snmp2::{Oid, SyncSession, Value};
 
-    let addr = format!("{host}:161");
+    // Bracket a bare IPv6 literal for the socket address.
+    let needs_brackets = host.matches(':').count() >= 2 && !host.starts_with('[');
+    let addr = if needs_brackets {
+        format!("[{host}]:161")
+    } else {
+        format!("{host}:161")
+    };
     let mut sess = SyncSession::new_v2c(addr.as_str(), community.as_bytes(), Some(timeout), 0)
         .map_err(|e| format!("snmp session: {e}"))?;
 
@@ -315,43 +325,63 @@ fn walk_all(host: &str, community: &str, timeout: std::time::Duration) -> Result
             _ => None,
         }
     }
+    // SNMP "end" exceptions: stop walking this subtree.
+    fn is_end_exception(v: &Value) -> bool {
+        matches!(
+            v,
+            Value::EndOfMibView | Value::NoSuchObject | Value::NoSuchInstance
+        )
+    }
 
     let mut map = OidMap::new();
+    let mut transport_ok = false;
     for (prefix, base) in WALK_BASES {
+        let want = format!("{prefix}.");
         let mut cur: Vec<u64> = base.to_vec();
-        for _ in 0..ROW_CAP {
+        for _ in 0..WALK_VARBIND_CAP {
             let cur_oid = match Oid::from(&cur) {
                 Ok(o) => o,
                 Err(_) => break,
             };
             let pdu = match sess.getnext(&cur_oid) {
                 Ok(p) => p,
-                Err(_) => break, // a subtree failing must not abort the others
+                Err(e) => {
+                    // First transport failure with nothing collected ⇒ host unreachable: give up.
+                    if !transport_ok {
+                        return Err(format!("snmp unreachable: {e}"));
+                    }
+                    break; // this subtree failed; try the others
+                }
             };
+            transport_ok = true;
             // Extract owned data before the borrowed pdu is dropped.
-            let extracted: Option<(String, Option<SnmpVal>)> = pdu
+            let extracted: Option<(String, Option<SnmpVal>, bool)> = pdu
                 .varbinds
                 .clone()
                 .next()
-                .map(|(oid, val)| (oid.to_id_string(), snmp_val(&val)));
-            let (oid_s, sval) = match extracted {
+                .map(|(oid, val)| (oid.to_id_string(), snmp_val(&val), is_end_exception(&val)));
+            let (oid_s, sval, is_exc) = match extracted {
                 Some(x) => x,
                 None => break,
             };
-            if oid_s.is_empty() || !oid_s.starts_with(&format!("{prefix}.")) && oid_s != *prefix {
-                break;
+            if is_exc || !oid_s.starts_with(&want) {
+                break; // end of MIB / left the subtree
             }
-            if let Some(v) = sval {
-                map.insert(oid_s.clone(), v);
-            }
-            cur = oid_s
+            let next: Vec<u64> = oid_s
                 .split('.')
                 .filter_map(|p| p.parse::<u64>().ok())
                 .collect();
-            if cur.is_empty() {
-                break;
+            if next.is_empty() || next <= cur {
+                break; // no numeric progress ⇒ avoid looping
             }
+            if let Some(v) = sval {
+                map.insert(oid_s, v);
+            }
+            cur = next;
         }
+    }
+    if map.is_empty() {
+        return Err("snmp: no data".into());
     }
     Ok(map)
 }

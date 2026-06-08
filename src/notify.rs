@@ -22,9 +22,17 @@ pub fn active_events(state: &PrinterState, cfg: &PrinterConfig) -> Vec<String> {
         e.push("offline".into());
     }
     let low = cfg.thresholds.supply_low;
+    // Low covers both a consumed supply running out AND a filled receptacle (waste tank)
+    // running full — both mean "attention needed".
     let supply_low = has(&Reason::SupplyLow)
         || state.supplies.iter().any(|s| {
-            s.class == SupplyClass::Consumed && s.level.as_pct().is_some_and(|p| p <= low)
+            s.level.as_pct().is_some_and(|p| {
+                let headroom = match s.class {
+                    SupplyClass::Consumed => p,
+                    SupplyClass::Filled => 100 - p,
+                };
+                headroom <= low
+            })
         });
     if supply_low {
         e.push("supply_low".into());
@@ -88,8 +96,12 @@ fn emit(event: &str, printer: &str) {
         "supply_empty" => "Supply empty",
         _ => event,
     };
+    use std::process::Stdio;
     let _ = std::process::Command::new("notify-send")
         .args(["-a", "printbar", printer, msg])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn();
 }
 

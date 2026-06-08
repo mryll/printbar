@@ -202,6 +202,15 @@ pub fn parse_attrs(m: &AttrMap) -> PrinterState {
 
 // ---- thin adapter over the `ipp` crate (network I/O; not unit-tested) ----
 
+/// Bracket a bare IPv6 literal for use in a URL authority (no-op if already bracketed or v4).
+fn bracket_ipv6(host: &str) -> String {
+    if host.matches(':').count() >= 2 && !host.starts_with('[') {
+        format!("[{host}]")
+    } else {
+        host.to_string()
+    }
+}
+
 /// One IPP source. `kind` is `Ipp` for a network host or `Cups` for a local queue.
 pub struct IppSource {
     pub kind: SourceKind,
@@ -221,7 +230,7 @@ impl Source for IppSource {
             ),
             _ => format!(
                 "ipp://{}{}",
-                target.host.as_deref().unwrap_or(""),
+                bracket_ipv6(target.host.as_deref().unwrap_or("")),
                 target.ipp_path
             ),
         };
@@ -251,6 +260,8 @@ fn query(uri_str: &str, timeout: Duration) -> Result<AttrMap, String> {
             IppValue::TextWithoutLanguage(s) => Some(AttrVal::Str(s.to_string())),
             IppValue::OctetString(s) => Some(AttrVal::Str(s.to_string())),
             IppValue::Uri(s) => Some(AttrVal::Str(s.to_string())),
+            IppValue::TextWithLanguage { text, .. } => Some(AttrVal::Str(text.to_string())),
+            IppValue::NameWithLanguage { name, .. } => Some(AttrVal::Str(name.to_string())),
             IppValue::Boolean(b) => Some(AttrVal::Str(b.to_string())),
             _ => None,
         }

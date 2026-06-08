@@ -97,15 +97,25 @@ fn pick_supplies(outcomes: &[SourceOutcome]) -> Vec<Supply> {
             .find(|o| o.kind == kind)
             .map(|o| &o.partial.supplies)
     };
-    // First: a source with at least one usable consumable.
+    // Take the source with the MOST usable supplies (so a partial SNMP set can't suppress a
+    // fuller IPP set); ties resolve to the richest source (RICH_PRIORITY order). Iterating in
+    // priority order and replacing only on a STRICTLY greater count keeps ties on the earlier
+    // (higher-priority) source.
+    let mut best: Option<(usize, &Vec<Supply>)> = None;
     for k in RICH_PRIORITY {
         if let Some(s) = by(k) {
-            if s.iter().any(|x| x.is_usable()) {
-                return s.clone();
+            let usable = s.iter().filter(|x| x.is_usable()).count();
+            if best.is_none_or(|(bu, _)| usable > bu) {
+                best = Some((usable, s));
             }
         }
     }
-    // Fallback: highest-priority non-empty set.
+    if let Some((u, s)) = best {
+        if u > 0 {
+            return s.clone();
+        }
+    }
+    // No usable supplies anywhere → highest-priority non-empty set (e.g. a lone waste row).
     for k in RICH_PRIORITY {
         if let Some(s) = by(k) {
             if !s.is_empty() {
@@ -174,6 +184,57 @@ mod tests {
         };
         let got = merge(&[ok(SourceKind::Snmp, snmp), ok(SourceKind::Ipp, ipp)]);
         assert_eq!(got.supplies, cmyk); // IPP's set, not SNMP's lone waste
+    }
+
+    #[test]
+    fn fuller_ipp_beats_partial_snmp_but_ties_go_to_snmp() {
+        let one = vec![supply(
+            SupplyKind::Toner,
+            SupplyClass::Consumed,
+            "Black",
+            Level::Pct(50),
+        )];
+        let four: Vec<Supply> = ["Black", "Cyan", "Magenta", "Yellow"]
+            .iter()
+            .map(|n| supply(SupplyKind::Toner, SupplyClass::Consumed, n, Level::Pct(60)))
+            .collect();
+        // partial SNMP (1 usable) vs full IPP (4 usable) → IPP wins
+        let got = merge(&[
+            ok(
+                SourceKind::Snmp,
+                PrinterState {
+                    supplies: one.clone(),
+                    ..Default::default()
+                },
+            ),
+            ok(
+                SourceKind::Ipp,
+                PrinterState {
+                    supplies: four.clone(),
+                    ..Default::default()
+                },
+            ),
+        ]);
+        assert_eq!(got.supplies, four);
+        // tie (4 vs 4) → SNMP wins (richest, higher priority)
+        let snmp4 = four.clone();
+        let got2 = merge(&[
+            ok(
+                SourceKind::Snmp,
+                PrinterState {
+                    supplies: snmp4.clone(),
+                    ..Default::default()
+                },
+            ),
+            ok(
+                SourceKind::Ipp,
+                PrinterState {
+                    supplies: four.clone(),
+                    ..Default::default()
+                },
+            ),
+        ]);
+        assert_eq!(got2.supplies, snmp4);
     }
 
     #[test]

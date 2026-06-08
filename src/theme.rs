@@ -41,7 +41,24 @@ impl ThemeColors {
         };
 
         let map = parse_toml_flat(&content);
-        Self::from_map(&map).unwrap_or_default()
+        Self::from_map(&map).unwrap_or_default().sanitized()
+    }
+
+    /// Replace any field that isn't a valid `#rgb`/`#rrggbb` color with the default palette's
+    /// value, so a malformed theme file can't inject broken Pango markup.
+    fn sanitized(self) -> Self {
+        let d = Self::default();
+        let pick = |c: String, fallback: String| if is_hex_color(&c) { c } else { fallback };
+        Self {
+            border: pick(self.border, d.border),
+            text: pick(self.text, d.text),
+            dim: pick(self.dim, d.dim),
+            accent: pick(self.accent, d.accent),
+            green: pick(self.green, d.green),
+            yellow: pick(self.yellow, d.yellow),
+            orange: pick(self.orange, d.orange),
+            error: pick(self.error, d.error),
+        }
     }
 
     fn from_map(map: &HashMap<String, String>) -> Option<Self> {
@@ -79,6 +96,13 @@ fn parse_toml_flat(content: &str) -> HashMap<String, String> {
         }
     }
     map
+}
+
+fn is_hex_color(s: &str) -> bool {
+    match s.strip_prefix('#') {
+        Some(h) => (h.len() == 3 || h.len() == 6) && h.chars().all(|c| c.is_ascii_hexdigit()),
+        None => false,
+    }
 }
 
 fn parse_hex(hex: &str) -> Option<(u8, u8, u8)> {

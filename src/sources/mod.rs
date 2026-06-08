@@ -74,7 +74,11 @@ pub fn run_sources(target: &Target, sources: Vec<Box<dyn Source>>) -> Vec<Source
     }
     drop(tx);
 
-    let overall = Instant::now() + target.timeout + Duration::from_millis(500);
+    // checked_add guards against an absurd timeout overflowing the Instant.
+    let budget = target.timeout.saturating_add(Duration::from_millis(500));
+    let overall = Instant::now()
+        .checked_add(budget)
+        .unwrap_or_else(|| Instant::now() + Duration::from_secs(60));
     let mut got: Vec<SourceOutcome> = Vec::with_capacity(n);
     while got.len() < n {
         match overall.checked_duration_since(Instant::now()) {
