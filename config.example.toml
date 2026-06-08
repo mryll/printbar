@@ -1,0 +1,34 @@
+# printbar — one [printer.<name>] section per printer.
+# Invoke as: printbar <name>   (e.g. printbar oficina)
+
+[printer.oficina]
+host = "192.168.1.70"        # enables IPP (+ SNMP if snmp.enabled); omit for USB-only
+ipp_path = "/ipp/print"      # default; change for printers with a non-standard IPP path
+cups = "HP_M477fdw"          # optional: enables the local CUPS/IPP path (covers USB)
+timeout = 4                  # per-source seconds
+
+[printer.oficina.snmp]
+enabled = true               # explicit; community alone does NOT enable SNMP
+community = "public"
+
+[printer.oficina.bar]
+format = "🖨 {supply_min}% {status_icon}"
+on_missing = "hide"          # "hide" | "error"
+
+[printer.oficina.tooltip]
+items = ["model", "status", "supplies", "paper", "jobs", "pages"]
+on_missing = "hide"
+max_rows = 12
+
+[printer.oficina.thresholds]
+supply_low = 15
+supply_critical = 5
+
+[printer.oficina.actions]
+on_click = "ews"             # opens the EWS (printer web panel) in the browser
+on_click_right = "queue"     # opens the CUPS queue
+# ews_url = "https://192.168.1.70"   # optional override (scheme/port/IPv6)
+
+[printer.oficina.notify]
+enabled = true
+events = ["jam", "supply_low", "offline"]
