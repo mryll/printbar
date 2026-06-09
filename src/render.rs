@@ -401,21 +401,42 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors) -> 
         .max()
         .unwrap_or(0)
         .max(12);
-    let mut out = vec![top_border(width, &t.border)];
+    // Framed = box drawn and the whole tooltip pinned to a Mono Nerd Font so rows
+    // stay aligned under any bar font. Plain (default) = no border/pin, renders in
+    // the user's font (nothing aligned to a right edge to misalign).
+    let frame = cfg.tooltip.frame;
+    let mut out: Vec<String> = Vec::new();
+    if frame {
+        out.push(top_border(width, &t.border));
+    }
     for r in &rows {
         if r == SEP {
-            out.push(separator(width, &t.border, &t.dim));
-        } else {
+            if frame {
+                out.push(separator(width, &t.border, &t.dim));
+            } else {
+                out.push(fg(&t.dim, &"─".repeat(width)));
+            }
+        } else if frame {
             let pad = " ".repeat(width.saturating_sub(visible_len(r)));
             out.push(format!(
                 "{} {r}{pad} {}",
                 fg(&t.border, "│"),
                 fg(&t.border, "│")
             ));
+        } else {
+            out.push(r.clone());
         }
     }
-    out.push(bottom_border(width, &t.border));
-    out.join("\n")
+    if frame {
+        out.push(bottom_border(width, &t.border));
+    }
+
+    let body = out.join("\n");
+    if frame {
+        format!("<span font_family='JetBrainsMono Nerd Font Mono'>{body}</span>")
+    } else {
+        body
+    }
 }
 
 pub fn render(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors) -> WaybarOutput {
@@ -512,6 +533,7 @@ mod tests {
         let mut c = cfg();
         c.tooltip.items = vec!["supplies".into()];
         c.tooltip.max_rows = 12;
+        c.tooltip.frame = true; // line count below includes the box borders
         let mut st = PrinterState::default();
         for i in 0..20 {
             st.supplies
@@ -521,5 +543,17 @@ mod tests {
         assert!(tip.contains("+8 more"));
         // 12 supply rows + "+8 more" row → 13 data rows, + 2 borders
         assert_eq!(tip.lines().count(), 12 + 1 + 2);
+    }
+
+    #[test]
+    fn plain_tooltip_is_borderless_and_unpinned() {
+        let t = ThemeColors::default();
+        let mut c = cfg(); // frame defaults to false → plain
+        c.tooltip.items = vec!["supplies".into()];
+        let mut st = PrinterState::default();
+        st.supplies.push(consumed("Black", Color::Black, 50));
+        let tip = build_tooltip(&st, &c, &t);
+        assert!(!tip.contains('╭') && !tip.contains('╰') && !tip.contains('│'));
+        assert!(!tip.contains("font_family"));
     }
 }

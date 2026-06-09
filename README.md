@@ -40,7 +40,7 @@ A generic printer monitor for [Waybar](https://github.com/Alexays/Waybar): statu
 
 - [Waybar](https://github.com/Alexays/Waybar)
 - A network printer (IPP/SNMP) and/or a configured CUPS queue (covers USB)
-- A [Nerd Font](https://www.nerdfonts.com/) for icons
+- A [Nerd Font](https://www.nerdfonts.com/) for icons (recommended; required only for the framed tooltip, `frame = true`)
 - Optional: `cups` (CUPS source + queue action + instant push), `libnotify` (notifications), `xdg-utils` (click actions)
 
 ## Installation
@@ -112,6 +112,9 @@ on_missing = "hide"          # "hide" | "error"
 [printer.office.tooltip]
 items = ["model", "status", "alerts", "display", "supplies", "paper", "jobs", "impressions"]
 max_rows = 12
+# Draw the bordered box and pin JetBrainsMono Nerd Font Mono so rows stay aligned under
+# any bar font. Off (default) = plain, borderless, renders in your font.
+frame = false
 ```
 
 ### Thresholds and styling

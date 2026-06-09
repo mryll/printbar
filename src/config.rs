@@ -56,6 +56,11 @@ pub struct TooltipCfg {
     pub on_missing: OnMissing,
     #[serde(default = "default_max_rows")]
     pub max_rows: usize,
+    /// Draw the framed tooltip box and pin `JetBrainsMono Nerd Font Mono` so rows
+    /// stay aligned under any bar font. Off (default) = plain, borderless, no font
+    /// pin — renders in the user's font; needs no specific font installed.
+    #[serde(default)]
+    pub frame: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -146,6 +151,7 @@ impl Default for TooltipCfg {
             items: default_tooltip_items(),
             on_missing: OnMissing::default(),
             max_rows: default_max_rows(),
+            frame: false,
         }
     }
 }
