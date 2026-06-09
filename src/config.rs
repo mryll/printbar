@@ -61,6 +61,9 @@ pub struct TooltipCfg {
     /// pin — renders in the user's font; needs no specific font installed.
     #[serde(default)]
     pub frame: bool,
+    /// Font family pinned in framed mode — must be a complete Mono Nerd Font.
+    #[serde(default = "default_frame_font")]
+    pub frame_font: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -122,6 +125,9 @@ fn default_tooltip_items() -> Vec<String> {
 fn default_max_rows() -> usize {
     12
 }
+fn default_frame_font() -> String {
+    "JetBrainsMono Nerd Font Mono".into()
+}
 fn default_low() -> u8 {
     15
 }
@@ -152,6 +158,7 @@ impl Default for TooltipCfg {
             on_missing: OnMissing::default(),
             max_rows: default_max_rows(),
             frame: false,
+            frame_font: default_frame_font(),
         }
     }
 }

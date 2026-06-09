@@ -112,9 +112,11 @@ on_missing = "hide"          # "hide" | "error"
 [printer.office.tooltip]
 items = ["model", "status", "alerts", "display", "supplies", "paper", "jobs", "impressions"]
 max_rows = 12
-# Draw the bordered box and pin JetBrainsMono Nerd Font Mono so rows stay aligned under
-# any bar font. Off (default) = plain, borderless, renders in your font.
+# Draw the bordered box and pin a Mono Nerd Font so rows stay aligned under any bar font.
+# Off (default) = plain, borderless, renders in your font.
 frame = false
+# Font pinned when frame = true — must be a complete Mono Nerd Font.
+frame_font = "JetBrainsMono Nerd Font Mono"
 ```
 
 ### Thresholds and styling

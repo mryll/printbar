@@ -433,7 +433,10 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors) -> 
 
     let body = out.join("\n");
     if frame {
-        format!("<span font_family='JetBrainsMono Nerd Font Mono'>{body}</span>")
+        format!(
+            "<span font_family='{}'>{body}</span>",
+            pango_escape(&cfg.tooltip.frame_font).replace('\'', "&apos;")
+        )
     } else {
         body
     }
