@@ -19,10 +19,44 @@ use sources::ipp::IppSource;
 use sources::snmp::SnmpSource;
 use sources::{run_sources, Source, SourceKind, Target};
 
+
+/// The reference `--help` prints. Same shape as the shell widgets in the
+/// family: a usage line, then one paragraph per flag, then the subcommands.
+/// Plain text on stdout, exit 0 — the exit-0 JSON contract is for the widget
+/// path, and a human asking for help is not that path.
+const HELP: &str = "\
+Usage: printbar [--help] <printer-name> [--json] [--no-color[=all|bar|tooltip]]
+       printbar action <ews|queue> --printer <name>
+
+--help     Print this reference and exit 0. Also accepted as -h.
+--json     Structured output mode: one raw-data JSON object (numbers, state
+           strings, and the resolved `palette`) instead of Waybar JSON, for
+           frontends that render their own UI — e.g. the Omarchy shell plugin
+           in omarchy/. Always exits 0; errors are reported in an \"error\"
+           field. Deliberately unaffected by --no-color: the document carries
+           data, never rendered presentation.
+--no-color[=all|bar|tooltip]
+           Monochrome output: no color markup on the chosen surface (default
+           \"all\"). Everything structural stays — glyphs, level bars, layout.
+           The \"class\" field and the --json payload are unaffected, so CSS
+           remains the way to style a monochrome bar. NO_COLOR=<non-empty> in
+           the environment means --no-color=all; an explicit flag wins over it.
+
+action     Run a printer action instead of reporting: `ews` opens the embedded
+           web server, `queue` opens the print queue. Both need --printer.
+
+The printer must have a [printer.<name>] section in the config file
+(~/.config/printbar/config.toml, or $PRINTBAR_CONFIG).
+";
+
 fn main() {
     // The exit-0 JSON contract: any error still prints valid JSON (Waybar-shaped by
     // default, structured when --json was asked for), exit 0.
     let args: Vec<String> = std::env::args().collect();
+    if args.iter().skip(1).any(|a| a == "--help" || a == "-h") {
+        print!("{HELP}");
+        return;
+    }
     let json_mode = args.iter().skip(1).any(|a| a == "--json");
     if let Err(e) = run(&args, json_mode) {
         if json_mode {
@@ -73,7 +107,7 @@ fn run(args: &[String], json_mode: bool) -> Result<(), String> {
     let colors = color::ColorMode::resolve(args, no_color_env().as_deref())?;
 
     let name = printer_arg(args)
-        .ok_or("usage: printbar <printer-name> [--json] [--no-color[=all|bar|tooltip]]")?;
+        .ok_or("usage: printbar <printer-name> [--json] [--no-color[=all|bar|tooltip]]\nRun printbar --help for the full reference.")?;
     let cfg = Config::load(&config_path())?;
     let pc = cfg
         .for_printer(name)
@@ -174,6 +208,17 @@ fn config_path() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+
+    // --help is part of the family contract: every widget answers it, prints
+    // a usage line, documents every flag it accepts, and exits 0.
+    #[test]
+    fn help_documents_every_flag() {
+        assert!(HELP.starts_with("Usage: printbar"));
+        for flag in ["--help", "--json", "--no-color"] {
+            assert!(HELP.contains(flag), "HELP does not document {flag}");
+        }
+        assert!(HELP.contains("action"), "HELP does not document the action subcommand");
+    }
     use super::*;
 
     fn args(v: &[&str]) -> Vec<String> {
