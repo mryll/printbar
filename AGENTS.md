@@ -9,7 +9,6 @@ Generic Waybar printer widget. One-shot Rust binary: collect (IPP + SNMP) → me
 - `palette.rs` owns every color printbar itself defines (severity from the theme, ink per colorant) and the supply ramp's stops. `supply_state` classifies against `supply_stops`, and `--json` publishes both, so the QML panel never keeps a second copy. The panel's own chrome still uses the shell's live `Color` tokens — deliberate, see the header comment in `omarchy/Panel.qml`.
 - Theme tests must never read the real environment: go through `load_from`/`dir_from`/`candidate_paths`, and pin `HOME` + the XDG dirs in `tests/cli.rs`.
 - Build: `make build`; install: `make install PREFIX=~/.local`. Lint: `cargo clippy`; format `cargo fmt`.
-- Design spec: `docs/2026-06-08-printbar-design.md`. Plan: `docs/2026-06-08-printbar-implementation-plan.md`.
 
 ## Release
 
