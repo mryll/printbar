@@ -86,7 +86,13 @@ Panel {
   // it still reads through the status label, the condition pills, the bold
   // percentage and the outlined meter track — and the structured JSON keeps
   // its `state` field for anything scripting on top of the CLI.
-  readonly property string colorMode: String(setting("colorMode", "full"))
+  // An unrecognized value normalizes to "full": a hand-edited shell.json must
+  // not be able to silently take the color off both surfaces.
+  readonly property string colorMode: {
+    var v = String(setting("colorMode", "full"))
+    return ["full", "none", "bar-only", "panel-only"].indexOf(v) >= 0 ? v : "full"
+  }
+  readonly property bool barColored:   colorMode === "full" || colorMode === "bar-only"
   readonly property bool panelColored: colorMode === "full" || colorMode === "panel-only"
 
   readonly property color urgent: panelColored ? Color.urgent : root.fg
@@ -199,7 +205,7 @@ Panel {
   // The meter track: an alpha wash over the popup card. Monochrome keeps the
   // same subdued wash, taken from the foreground instead of the accent.
   readonly property color trackFill: panelColored
-    ? Style.selectedFillFor(root.fg, Color.accent)
+    ? Style.selectedFillFor(root.fg, Color.accent, root.urgent)
     : root.alphaColor(root.fg, Style.selectedFillAlpha)
 
   // The fill is the supply's ink at FULL strength at every level — length alone
@@ -481,6 +487,10 @@ Panel {
       root.bar.centerHoverRevealSuppressed = value
   }
 
+  // The shell's base handler covers open/close/show/hide/toggle; this one adds
+  // `refresh` so a keybind or a script can force a fetch without opening the
+  // panel. Overriding means restating the five, so `manageIpc: false` above
+  // turns the base one off and this is the only handler on the target.
   IpcHandler {
     target: root.ipcTarget
 
