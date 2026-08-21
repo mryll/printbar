@@ -37,6 +37,7 @@
         "key": "refreshIntervalSec",
         "type": "integer",
         "label": "Refresh interval (seconds)",
+        "description": "How often to poll the printer. Each poll is one request on the LAN, so a short interval is cheap — but a sleeping printer may take a few seconds to answer.",
         "min": 5,
         "max": 3600,
         "step": 5,
@@ -67,7 +68,7 @@
           "panel-only"
         ],
         "defaultValue": "full",
-        "description": "full: colored everywhere. none: monochrome everywhere. bar-only: colored bar glyph, monochrome panel. panel-only: colored panel, monochrome bar glyph. Severity still reads through text, glyphs and the meter outline."
+        "description": "Monochrome rendering uses foreground tones only — severity stays readable through the numbers and glyphs. none: no color anywhere. bar-only: colored bar face, plain panel. panel-only: the reverse."
       }
     ]
   }
