@@ -1,0 +1,339 @@
+#!/usr/bin/env bash
+# printbar demo fixture — a stand-in for the `printbar` binary that always
+# reports the same rich, entirely fictional printer, so the README screenshots
+# can show conditions a healthy office printer never produces on cue.
+#
+#   PATH="$PWD/screenshots/demo:$PATH" printbar office          # waybar mode
+#   PATH="$PWD/screenshots/demo:$PATH" printbar office --json   # plugin mode
+#
+# It speaks both output modes and honors --no-color / NO_COLOR exactly as the
+# real CLI does, so the monochrome shots go through it too. Not wired into the
+# build, the install target or the test suite: this is documentation tooling.
+#
+# The fictional printer is deliberately mid-crisis but still working:
+#   * four supplies spread across the whole gauge (82 / 46 / 11 / 4 %), so one
+#     shot shows the healthy, low and critical treatments side by side;
+#   * Tray 1 out of paper while Tray 2 keeps the job going;
+#   * two active conditions, one warn and one critical, for both pill tones;
+#   * the machine's own front-panel words, printbar's signature datum;
+#   * a live queue and a lifetime page counter.
+#
+# Nothing here is real: the host is `printer.local`, per RFC 5737 practice.
+
+set -euo pipefail
+
+# ${#string} must count characters, not bytes — the tooltip's separator width
+# is derived from it, and every row is full of box drawing and Nerd Font glyphs.
+export LC_ALL=C.UTF-8
+
+# ---- the fixture ------------------------------------------------------------
+
+MODEL="Color Laser MFP 4300"
+NAME="office"
+STATUS="printing"
+DISPLAY_TEXT="Load Tray 1: Plain, Letter"
+JOBS=2
+IMPRESSIONS=18452
+EWS_URL="http://printer.local"
+
+# name|kind|colorant|percent|threshold-state
+SUPPLIES=(
+  "Black Cartridge|toner|black|82|ok"
+  "Cyan Cartridge|toner|cyan|46|ok"
+  "Magenta Cartridge|toner|magenta|11|warn"
+  "Yellow Cartridge|toner|yellow|4|critical"
+)
+
+# The physical colorant colors, mirroring src/palette.rs. They are published in
+# `palette.ink` and the panel paints its swatches from them.
+INK_BLACK="#262626"
+INK_CYAN="#26c6da"
+INK_MAGENTA="#d05ce3"
+INK_YELLOW="#fbc02d"
+INK_TRICOLOR="#9ccc65"
+INK_PHOTO="#90a4ae"
+INK_OTHER="#8a8a8a"
+
+# printbar's default thresholds, which put the four levels above in the ok /
+# ok / warn / critical bands.
+SUPPLY_LOW=15
+SUPPLY_CRITICAL=5
+# name|percent|empty
+TRAYS=(
+  "Tray 1|0|true"
+  "Tray 2|60|false"
+)
+# code|label|state
+REASONS=(
+  "supply-low|Supply low|warn"
+  "media-empty|Out of paper|critical"
+)
+# Worst of: media-empty (critical) and the yellow cartridge at 4% (critical).
+STATE="critical"
+
+# ---- CLI ---------------------------------------------------------------------
+
+json=0
+color_bar=1
+color_tip=1
+printer=""
+bad_value=""
+
+# NO_COLOR (no-color.org): any non-empty value means monochrome everywhere.
+if [[ -n ${NO_COLOR:-} ]]; then
+  color_bar=0
+  color_tip=0
+fi
+
+for arg in "$@"; do
+  case "$arg" in
+    --json) json=1 ;;
+    --no-color | --no-color=all) color_bar=0 color_tip=0 ;;
+    --no-color=bar) color_bar=0 color_tip=1 ;;
+    --no-color=tooltip) color_bar=1 color_tip=0 ;;
+    --no-color=*) bad_value="${arg#--no-color=}" ;;
+    # `printbar action ews|queue --printer NAME` opens a URL; a fixture opens
+    # nothing, and the real CLI exits 0 either way.
+    action) exit 0 ;;
+    --*) ;;
+    *) [[ -z $printer ]] && printer="$arg" ;;
+  esac
+done
+printer="${printer:-office}"
+
+if [[ -n $bad_value ]]; then
+  msg="--no-color: unknown value '$bad_value' (expected all, bar or tooltip)"
+  if ((json)); then
+    printf '{"schema_version":1,"printer":"%s","name":null,"model":null,"status":null,"display":null,"state":"error","reasons":[],"supplies":[],"trays":[],"jobs":null,"impressions":null,"ews_url":null,"queue_url":null,"error":{"message":"%s"}}\n' \
+      "$printer" "$msg"
+  else
+    printf '{"text":"?","tooltip":"%s","class":["error"],"alt":"error"}\n' "$msg"
+  fi
+  exit 0
+fi
+
+# ---- theme ------------------------------------------------------------------
+
+# Theme palette, read the way src/theme.rs reads it: the Omarchy 4.x state dir
+# first, the pre-4.x config dir as a fallback, the built-in palette otherwise.
+theme_file="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/current/theme/colors.toml"
+[[ -f $theme_file ]] || theme_file="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/current/theme/colors.toml"
+
+theme_key() {
+  [[ -f $theme_file ]] || return 0
+  sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\"\{0,1\}\([^\"]*\)\"\{0,1\}[[:space:]]*$/\1/p" \
+    "$theme_file" | head -1
+}
+
+is_hex() { [[ $1 =~ ^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$ ]]; }
+
+# First valid hex among the given theme keys, else the trailing default.
+pick() {
+  local fallback="${!#}" key value
+  for key in "${@:1:$#-1}"; do
+    value=$(theme_key "$key")
+    if is_hex "$value"; then
+      printf '%s' "$value"
+      return
+    fi
+  done
+  printf '%s' "$fallback"
+}
+
+# 50/50 mix, used for `dim` exactly as the real renderer derives it.
+blend() {
+  local a="$1" b="$2"
+  [[ ${#a} -eq 7 && ${#b} -eq 7 ]] || {
+    printf '#5c6370'
+    return
+  }
+  # +1 before the halving so this rounds like the real renderer's f32 blend.
+  printf '#%02x%02x%02x' \
+    $((((16#${a:1:2}) + (16#${b:1:2}) + 1) / 2)) \
+    $((((16#${a:3:2}) + (16#${b:3:2}) + 1) / 2)) \
+    $((((16#${a:5:2}) + (16#${b:5:2}) + 1) / 2))
+}
+
+C_ACCENT=$(pick accent blue color4 "#61afef")
+C_TEXT=$(pick foreground "#abb2bf")
+C_BG=$(pick background "#282c34")
+C_GREEN=$(pick green color2 "#98c379")
+C_ORANGE=$(pick orange red color1 "#d19a66")
+C_ERROR=$(pick red color1 "#e06c75")
+C_DIM=$(blend "$C_TEXT" "$C_BG")
+
+# ---- structured mode ---------------------------------------------------------
+
+if ((json)); then
+  reasons=""
+  for r in "${REASONS[@]}"; do
+    IFS='|' read -r code label rstate <<<"$r"
+    [[ -n $reasons ]] && reasons+=","
+    reasons+=$(printf '{"code":"%s","label":"%s","state":"%s"}' "$code" "$label" "$rstate")
+  done
+
+  supplies=""
+  for s in "${SUPPLIES[@]}"; do
+    IFS='|' read -r sname kind colorant pct sstate _swatch <<<"$s"
+    [[ -n $supplies ]] && supplies+=","
+    supplies+=$(printf '{"name":"%s","kind":"%s","class":"consumed","color":"%s","color_raw":null,"level_pct":%s,"level":"percent","state":"%s"}' \
+      "$sname" "$kind" "$colorant" "$pct" "$sstate")
+  done
+
+  trays=""
+  for t in "${TRAYS[@]}"; do
+    IFS='|' read -r tname pct empty <<<"$t"
+    [[ -n $trays ]] && trays+=","
+    trays+=$(printf '{"name":"%s","level_pct":%s,"level":"percent","empty":%s}' "$tname" "$pct" "$empty")
+  done
+
+  # The published ramp: theme-resolved severity colors, the physical colorant
+  # inks, and the threshold stops. The panel renders its swatches and fills
+  # from this, so the fixture must carry it or the demo panel goes grey.
+  palette=$(printf '{"severity":{"ok":"%s","warn":"%s","critical":"%s","offline":"%s","error":"%s","unknown":"%s"},"ink":{"black":"%s","cyan":"%s","magenta":"%s","yellow":"%s","tri-color":"%s","photo":"%s","other":"%s"},"stops":[{"pct":%s,"state":"critical","color":"%s"},{"pct":%s,"state":"warn","color":"%s"},{"pct":100,"state":"ok","color":"%s"}]}' \
+    "$C_GREEN" "$C_ORANGE" "$C_ERROR" "$C_DIM" "$C_ERROR" "$C_DIM" \
+    "$INK_BLACK" "$INK_CYAN" "$INK_MAGENTA" "$INK_YELLOW" "$INK_TRICOLOR" \
+    "$INK_PHOTO" "$INK_OTHER" \
+    "$SUPPLY_CRITICAL" "$C_ERROR" "$SUPPLY_LOW" "$C_ORANGE" "$C_GREEN")
+
+  # --no-color never reaches this document: it carries raw data, `state` and
+  # the palette, never a rendering. Same contract as the real CLI.
+  printf '{"schema_version":1,"printer":"%s","name":"%s","model":"%s","status":"%s","display":"%s","state":"%s","reasons":[%s],"supplies":[%s],"trays":[%s],"jobs":%s,"impressions":%s,"ews_url":"%s","queue_url":"http://localhost:631/printers/%s","palette":%s,"error":null}\n' \
+    "$printer" "$NAME" "$MODEL" "$STATUS" "$DISPLAY_TEXT" "$STATE" \
+    "$reasons" "$supplies" "$trays" "$JOBS" "$IMPRESSIONS" "$EWS_URL" \
+    "${MODEL// /_}" "$palette"
+  exit 0
+fi
+
+# ---- waybar mode -------------------------------------------------------------
+
+
+paint() { # color text — a span, or the bare text in monochrome
+  if ((color_tip)); then printf "<span foreground='%s'>%s</span>" "$1" "$2"; else printf '%s' "$2"; fi
+}
+
+paint_bold() {
+  if ((color_tip)); then
+    printf "<span font_weight='bold' foreground='%s'>%s</span>" "$1" "$2"
+  else
+    printf "<span font_weight='bold'>%s</span>" "$2"
+  fi
+}
+
+repeat() { # char count
+  local out="" i
+  for ((i = 0; i < $2; i++)); do out+="$1"; done
+  printf '%s' "$out"
+}
+
+pad() { repeat " " "$1"; }
+
+SEP=$'\001sep'
+plain=()
+rich=()
+row() {
+  plain+=("$1")
+  rich+=("$2")
+}
+
+# model, then a full-width rule
+row "$MODEL" "$(paint_bold "$C_ACCENT" "$MODEL")"
+row "$SEP" "$SEP"
+
+# status — the dot goes red because a hard condition (out of paper) is active
+row "● Printing" "$(paint "$C_ERROR" "●") $(paint "$C_TEXT" "Printing")"
+
+# active conditions
+for r in "${REASONS[@]}"; do
+  IFS='|' read -r _code label rstate <<<"$r"
+  case "$rstate" in
+    critical) rc="$C_ERROR" ;;
+    *) rc="$C_ORANGE" ;;
+  esac
+  row "⚠ $label" "$(paint "$rc" "⚠ $label")"
+done
+
+# the printer's own front-panel words
+row "Panel $DISPLAY_TEXT" "$(paint "$C_DIM" "Panel") $(paint "$C_ACCENT" "$DISPLAY_TEXT")"
+
+# supplies: colorant swatch, aligned label, five level cells, percentage
+label_w=0
+val_w=0
+# The tooltip draws the swatch as a bare glyph, so — exactly like
+# palette::swatch_on_surface — black ink and an unnamed colorant defer to a
+# theme color that is legible on the surface. Every saturated ink paints as
+# itself.
+swatch_for() {
+  case "$1" in
+    black) printf '%s' "$C_TEXT" ;;
+    cyan) printf '%s' "$INK_CYAN" ;;
+    magenta) printf '%s' "$INK_MAGENTA" ;;
+    yellow) printf '%s' "$INK_YELLOW" ;;
+    tri-color) printf '%s' "$INK_TRICOLOR" ;;
+    photo) printf '%s' "$INK_PHOTO" ;;
+    *) printf '%s' "$C_DIM" ;;
+  esac
+}
+
+for s in "${SUPPLIES[@]}"; do
+  IFS='|' read -r _n _k colorant pct _st <<<"$s"
+  lbl="${colorant^}"
+  ((${#lbl} > label_w)) && label_w=${#lbl}
+  ((${#pct} + 1 > val_w)) && val_w=$((${#pct} + 1))
+done
+for s in "${SUPPLIES[@]}"; do
+  IFS='|' read -r _name _kind colorant pct sstate <<<"$s"
+  swatch="$(swatch_for "$colorant")"
+  lbl="${colorant^}"
+  val="${pct}%"
+  filled=$(((pct + 19) / 20))
+  cells="$(repeat "▰" "$filled")$(repeat "▱" $((5 - filled)))"
+  case "$sstate" in
+    critical) bc="$C_ERROR" ;;
+    warn) bc="$C_ORANGE" ;;
+    *) bc="$C_GREEN" ;;
+  esac
+  lpad=$(pad $((label_w - ${#lbl})))
+  vpad=$(pad $((val_w - ${#val})))
+  row "● ${lbl}${lpad}  ${cells}  ${vpad}${val}" \
+    "$(paint "$swatch" "●") $(paint "$C_TEXT" "$lbl")${lpad}  $(paint "$bc" "$cells")  ${vpad}$(paint "$bc" "$val")"
+done
+
+# paper trays
+name_w=0
+for t in "${TRAYS[@]}"; do
+  IFS='|' read -r tname _p _e <<<"$t"
+  ((${#tname} > name_w)) && name_w=${#tname}
+done
+for t in "${TRAYS[@]}"; do
+  IFS='|' read -r tname pct _empty <<<"$t"
+  npad=$(pad $((name_w - ${#tname})))
+  row "󱊖 ${tname}${npad}  ${pct}%" \
+    "$(paint "$C_DIM" "󱊖") $(paint "$C_DIM" "$tname")${npad}  $(paint "$C_TEXT" "${pct}%")"
+done
+
+row "Jobs $JOBS" "$(paint "$C_DIM" "Jobs") $(paint "$C_TEXT" "$JOBS")"
+row "Impressions $IMPRESSIONS" "$(paint "$C_DIM" "Impressions") $(paint "$C_TEXT" "$IMPRESSIONS")"
+
+# The rule spans the widest row, like the real renderer's plain (unframed) mode.
+width=12
+for p in "${plain[@]}"; do
+  [[ $p == "$SEP" ]] && continue
+  ((${#p} > width)) && width=${#p}
+done
+
+tooltip=""
+for i in "${!rich[@]}"; do
+  line="${rich[$i]}"
+  [[ ${plain[$i]} == "$SEP" ]] && line="$(paint "$C_DIM" "$(repeat "─" "$width")")"
+  [[ -n $tooltip ]] && tooltip+='\n'
+  tooltip+="$line"
+done
+
+# The default bar format: the Nerd Font printer glyph and the worst supply.
+# It carries no color of its own, so --no-color=bar has nothing to strip here —
+# exactly like the real CLI, whose bar color can only come from a user format.
+text="󰐪 4%"
+
+printf '{"text":"%s","tooltip":"%s","class":["%s"],"alt":"%s"}\n' \
+  "$text" "$tooltip" "$STATE" "$STATE"

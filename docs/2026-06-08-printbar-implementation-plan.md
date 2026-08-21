@@ -150,7 +150,7 @@ toml = "1"
 
 **Files:** Create `src/actions.rs`; Modify `main.rs`.
 
-- [ ] **Step 1: Failing test** — `ews_url(&PrinterConfig)` builds `http://192.168.1.70` from host; respects explicit configured URL, https, port, and bracketed IPv6.
+- [ ] **Step 1: Failing test** — `ews_url(&PrinterConfig)` builds `http://192.0.2.70` from host; respects explicit configured URL, https, port, and bracketed IPv6.
 - [ ] **Step 2:** Run → FAIL.
 - [ ] **Step 3:** Implement `ews_url`, `queue_target`, and `run(action,&cfg)` → `xdg-open` (best-effort). Wire `printbar action ews|queue --printer <name>`.
 - [ ] **Step 4:** Run → PASS.

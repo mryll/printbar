@@ -2,7 +2,7 @@
 # Invoke as: printbar <name>   (e.g. printbar oficina)
 
 [printer.oficina]
-host = "192.168.1.70"        # enables IPP (+ SNMP if snmp.enabled); omit for USB-only
+host = "192.0.2.70"        # enables IPP (+ SNMP if snmp.enabled); omit for USB-only
 ipp_path = "/ipp/print"      # default; change for printers with a non-standard IPP path
 cups = "HP_M477fdw"          # optional: enables the local CUPS/IPP path (covers USB)
 timeout = 4                  # per-source seconds
@@ -29,7 +29,7 @@ supply_critical = 5
 [printer.oficina.actions]
 on_click = "ews"             # opens the EWS (printer web panel) in the browser
 on_click_right = "queue"     # opens the CUPS queue
-# ews_url = "https://192.168.1.70"   # optional override (scheme/port/IPv6)
+# ews_url = "https://192.0.2.70"   # optional override (scheme/port/IPv6)
 
 [printer.oficina.notify]
 enabled = true

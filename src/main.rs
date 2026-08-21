@@ -1,8 +1,11 @@
 mod actions;
+mod color;
 mod config;
+mod json;
 mod merge;
 mod model;
 mod notify;
+mod palette;
 mod render;
 mod sources;
 mod theme;
@@ -17,20 +20,60 @@ use sources::snmp::SnmpSource;
 use sources::{run_sources, Source, SourceKind, Target};
 
 fn main() {
-    // The exit-0 JSON contract: any error still prints valid Waybar JSON, exit 0.
-    if let Err(e) = run() {
-        println!("{}", waybar::error_output(&e));
+    // The exit-0 JSON contract: any error still prints valid JSON (Waybar-shaped by
+    // default, structured when --json was asked for), exit 0.
+    let args: Vec<String> = std::env::args().collect();
+    let json_mode = args.iter().skip(1).any(|a| a == "--json");
+    if let Err(e) = run(&args, json_mode) {
+        if json_mode {
+            println!(
+                "{}",
+                json::error_output(json_error_printer(&args).unwrap_or(""), &e)
+            );
+        } else {
+            println!("{}", waybar::error_output(&e));
+        }
     }
 }
 
-fn run() -> Result<(), String> {
-    let args: Vec<String> = std::env::args().collect();
+/// First positional argument (the printer name), skipping any flags.
+fn printer_arg(args: &[String]) -> Option<&str> {
+    args.iter()
+        .skip(1)
+        .find(|a| !a.starts_with("--"))
+        .map(String::as_str)
+}
 
+/// Printer name to report in a structured error: the `--printer` flag on the
+/// action path, the positional name otherwise.
+fn json_error_printer(args: &[String]) -> Option<&str> {
     if args.get(1).map(String::as_str) == Some("action") {
-        return run_action(&args);
+        return args
+            .iter()
+            .position(|a| a == "--printer")
+            .and_then(|i| args.get(i + 1))
+            .map(String::as_str);
+    }
+    printer_arg(args)
+}
+
+fn run(args: &[String], json_mode: bool) -> Result<(), String> {
+    if args.get(1).map(String::as_str) == Some("action") {
+        // --json is the monitor's structured output; an action produces no
+        // monitor document, so the combination is rejected up front (still
+        // exit 0 with a structured error, and NO action is performed).
+        if json_mode {
+            return Err("--json applies to monitor output, not actions".into());
+        }
+        return run_action(args);
     }
 
-    let name = args.get(1).ok_or("usage: printbar <printer-name>")?;
+    // Resolved before any I/O, so a bad --no-color value fails fast through the
+    // usual exit-0 error path instead of after a network poll.
+    let colors = color::ColorMode::resolve(args, no_color_env().as_deref())?;
+
+    let name = printer_arg(args)
+        .ok_or("usage: printbar <printer-name> [--json] [--no-color[=all|bar|tooltip]]")?;
     let cfg = Config::load(&config_path())?;
     let pc = cfg
         .for_printer(name)
@@ -45,10 +88,31 @@ fn run() -> Result<(), String> {
     }
     let outcomes = run_sources(&target, srcs);
     let state = merge::merge(&outcomes);
-    notify::maybe_notify(name, pc, &state);
+    // Desktop notifications belong to the waybar/printbar-watch path; the
+    // Omarchy plugin (--json consumer) has its own UI, and firing here too
+    // would duplicate transition notifications when both frontends poll.
+    if !json_mode {
+        notify::maybe_notify(name, pc, &state);
+    }
+    // Both modes resolve the same theme: the tooltip paints with it, and the
+    // structured document publishes it as `palette` so the plugin renders
+    // printbar's ramp instead of keeping a second copy of it.
     let theme = theme::ThemeColors::load();
-    render::render(&state, pc, &theme).print();
+    if json_mode {
+        // Deliberately unaffected by --no-color: the structured document carries
+        // raw data, `state` and the palette, never rendered presentation, and
+        // the plugin decides its own rendering from it.
+        json::render(name, &state, pc, &theme).print();
+    } else {
+        render::render(&state, pc, &theme, colors).print();
+    }
     Ok(())
+}
+
+/// `NO_COLOR` per <https://no-color.org>: set to anything non-empty means
+/// monochrome. Read once here so the resolver itself stays pure and testable.
+fn no_color_env() -> Option<String> {
+    std::env::var("NO_COLOR").ok()
 }
 
 fn run_action(args: &[String]) -> Result<(), String> {
@@ -106,4 +170,83 @@ fn config_path() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("~/.config"))
         .join("printbar/config.toml")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn action_with_json_is_rejected_without_running_the_action() {
+        // run() must bail out before run_action (no config load, no xdg-open),
+        // so main prints the structured error schema and exits 0.
+        let a = args(&["printbar", "action", "ews", "--printer", "office", "--json"]);
+        let err = run(&a, true).unwrap_err();
+        assert_eq!(err, "--json applies to monitor output, not actions");
+        // The structured error carries the action's --printer name.
+        let s = json::error_output(json_error_printer(&a).unwrap_or(""), &err);
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["printer"], "office");
+        assert_eq!(v["state"], "error");
+        assert_eq!(
+            v["error"]["message"],
+            "--json applies to monitor output, not actions"
+        );
+    }
+
+    #[test]
+    fn unknown_no_color_value_fails_before_any_io() {
+        // No config is read and no printer is polled: the argument error comes
+        // straight back, and main turns it into the exit-0 error document.
+        let a = args(&["printbar", "office", "--no-color=bogus"]);
+        let err = run(&a, false).unwrap_err();
+        assert_eq!(
+            err,
+            "--no-color: unknown value 'bogus' (expected all, bar or tooltip)"
+        );
+        let v: serde_json::Value = serde_json::from_str(&waybar::error_output(&err)).unwrap();
+        assert_eq!(v["class"], serde_json::json!(["error"]));
+        assert_eq!(v["tooltip"], err);
+        // Same error, structured shape, in --json mode.
+        let a = args(&["printbar", "office", "--json", "--no-color=bogus"]);
+        let err = run(&a, true).unwrap_err();
+        let s = json::error_output(json_error_printer(&a).unwrap_or(""), &err);
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["printer"], "office");
+        assert_eq!(v["state"], "error");
+        assert_eq!(v["error"]["message"], err);
+    }
+
+    #[test]
+    fn flags_never_masquerade_as_the_printer_name() {
+        assert_eq!(printer_arg(&args(&["printbar", "office"])), Some("office"));
+        assert_eq!(
+            printer_arg(&args(&["printbar", "--no-color=bar", "office", "--json"])),
+            Some("office")
+        );
+        assert_eq!(printer_arg(&args(&["printbar", "--no-color"])), None);
+    }
+
+    #[test]
+    fn json_error_printer_prefers_action_flag() {
+        assert_eq!(
+            json_error_printer(&args(&[
+                "printbar",
+                "action",
+                "queue",
+                "--printer",
+                "x",
+                "--json"
+            ])),
+            Some("x")
+        );
+        assert_eq!(
+            json_error_printer(&args(&["printbar", "office", "--json"])),
+            Some("office")
+        );
+    }
 }

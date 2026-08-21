@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "id": "mryll.printbar",
+  "name": "Printbar",
+  "version": "1.0.0",
+  "author": "mryll",
+  "license": "MIT",
+  "description": "Printer status, supplies, trays and jobs (printbar) in the Omarchy bar.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "omarchy/BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Printer",
+    "description": "Click: status panel. Right click: printer web panel (EWS). Middle click: refresh.",
+    "category": "Hardware",
+    "allowMultiple": true,
+    "defaultSection": "right",
+    "defaults": {
+      "printerName": "office",
+      "refreshIntervalSec": 30,
+      "configPath": "",
+      "hideWhenIdle": false,
+      "colorMode": "full"
+    },
+    "schema": [
+      {
+        "key": "printerName",
+        "type": "string",
+        "label": "Printer name",
+        "defaultValue": "office",
+        "description": "The [printer.<name>] section in printbar's config.toml."
+      },
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 5,
+        "max": 3600,
+        "step": 5,
+        "defaultValue": 30
+      },
+      {
+        "key": "configPath",
+        "type": "path",
+        "label": "Config file override",
+        "defaultValue": "",
+        "description": "Optional. Passed to printbar as PRINTBAR_CONFIG; empty uses ~/.config/printbar/config.toml."
+      },
+      {
+        "key": "hideWhenIdle",
+        "type": "boolean",
+        "label": "Hide when idle",
+        "defaultValue": false,
+        "description": "Show the widget only while printing or when the printer needs attention."
+      },
+      {
+        "key": "colorMode",
+        "type": "enum",
+        "label": "Colors",
+        "options": [
+          "full",
+          "none",
+          "bar-only",
+          "panel-only"
+        ],
+        "defaultValue": "full",
+        "description": "full: colored everywhere. none: monochrome everywhere. bar-only: colored bar glyph, monochrome panel. panel-only: colored panel, monochrome bar glyph. Severity still reads through text, glyphs and the meter outline."
+      }
+    ]
+  }
+}

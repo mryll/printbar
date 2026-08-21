@@ -195,7 +195,7 @@ mod tests {
     fn parses_section_with_defaults() {
         let toml = r#"
             [printer.oficina]
-            host = "192.168.1.70"
+            host = "192.0.2.70"
             cups = "HP_M477fdw"
 
             [printer.oficina.snmp]
@@ -209,7 +209,7 @@ mod tests {
         "#;
         let cfg = Config::parse(toml).unwrap();
         let p = cfg.for_printer("oficina").unwrap();
-        assert_eq!(p.host.as_deref(), Some("192.168.1.70"));
+        assert_eq!(p.host.as_deref(), Some("192.0.2.70"));
         assert_eq!(p.ipp_path, "/ipp/print"); // default
         assert_eq!(p.timeout, 4); // default
         assert!(p.snmp.enabled);

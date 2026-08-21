@@ -1,12 +1,12 @@
 //! Render a `PrinterState` into Waybar JSON: bar from a token template (with
 //! literal-absorption on hidden tokens), framed/themed tooltip, and a worst-state class.
 
+use crate::color::ColorMode;
 use crate::config::{OnMissing, PrinterConfig};
 use crate::model::{Color, Level, PrinterState, Reason, Status, Supply, SupplyClass, SupplyKind};
+use crate::palette;
 use crate::theme::ThemeColors;
-use crate::waybar::{
-    bold_fg, bottom_border, fg, pango_escape, separator, top_border, visible_len, WaybarOutput,
-};
+use crate::waybar::{pango_escape, strip_color_markup, visible_len, Paint, WaybarOutput};
 
 const HIDDEN: char = '\u{0}'; // marker for a hidden token; words containing it are dropped
 
@@ -46,7 +46,8 @@ fn reason_display<'a>(r: &Reason, t: &'a ThemeColors) -> (String, &'a str) {
 }
 
 /// Effective "badness" percent for a supply: how close to empty (Consumed) or full (Filled).
-fn supply_badness(s: &Supply) -> Option<u8> {
+/// Shared with the structured JSON mode so both frontends see the same thresholds.
+pub fn supply_badness(s: &Supply) -> Option<u8> {
     s.level.as_pct().map(|p| match s.class {
         SupplyClass::Consumed => p,     // low = bad
         SupplyClass::Filled => 100 - p, // high = bad → invert to headroom
@@ -109,6 +110,11 @@ fn resolve(token: &str, state: &PrinterState) -> Option<String> {
 /// Substitute `{token}`s. Hidden tokens (Hide mode) become a marker, then any
 /// whitespace-delimited word containing the marker is dropped, so `"{x}%"` leaves no
 /// dangling `%`. Returns (text, had_error) where had_error is set when Error mode hit a miss.
+///
+/// Substituted VALUES are Pango-escaped — `{model}` and `{name}` come from the
+/// printer, and Waybar renders `text` as markup, so a model called
+/// `Smith & Sons <Lab>` would otherwise blank the bar. The format's own
+/// literals are left alone: markup there is the user's, deliberately written.
 fn render_template(fmt: &str, state: &PrinterState, on_missing: OnMissing) -> (String, bool) {
     let mut out = String::new();
     let mut had_error = false;
@@ -119,7 +125,7 @@ fn render_template(fmt: &str, state: &PrinterState, on_missing: OnMissing) -> (S
         if let Some(end) = after.find('}') {
             let token = &after[..end];
             match resolve(token, state) {
-                Some(v) => out.push_str(&v),
+                Some(v) => out.push_str(&pango_escape(&v)),
                 None => match on_missing {
                     OnMissing::Hide => out.push(HIDDEN),
                     OnMissing::Error => {
@@ -196,30 +202,14 @@ fn level_str(l: Level) -> String {
     }
 }
 
+/// Threshold color for a supply row — the same stops the structured JSON
+/// publishes, so both frontends change together.
 fn supply_color<'a>(s: &Supply, cfg: &PrinterConfig, t: &'a ThemeColors) -> &'a str {
-    match supply_badness(s) {
-        Some(b) if b <= cfg.thresholds.supply_critical => &t.error,
-        Some(b) if b <= cfg.thresholds.supply_low => &t.orange,
-        Some(_) => &t.green,
-        None => &t.dim,
-    }
+    palette::severity(palette::supply_state(supply_badness(s), &cfg.thresholds), t)
 }
 
 /// Sentinel row rendered as a full-width section separator.
 const SEP: &str = "\u{1}sep";
-
-/// A representative visible color for a supply's colorant (toner/ink identity swatch).
-fn swatch_color(c: Option<Color>) -> &'static str {
-    match c {
-        Some(Color::Black) => "#c8c8c8",
-        Some(Color::Cyan) => "#26c6da",
-        Some(Color::Magenta) => "#d05ce3",
-        Some(Color::Yellow) => "#fbc02d",
-        Some(Color::TriColor) => "#9ccc65",
-        Some(Color::Photo) => "#90a4ae",
-        _ => "#8a8a8a",
-    }
-}
 
 /// Short, alignable supply label: the colorant name, else the kind, else the full name.
 fn supply_label(s: &Supply) -> String {
@@ -269,26 +259,28 @@ fn status_dot<'a>(state: &PrinterState, t: &'a ThemeColors) -> &'a str {
     }
 }
 
-/// Build the framed, themed tooltip from configured items.
-fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors) -> String {
+/// Build the framed, themed tooltip from configured items. `p` decides whether
+/// the theme colors are actually painted (see `--no-color`); everything
+/// structural — glyphs, level cells, box drawing, alignment — is unaffected.
+fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors, p: Paint) -> String {
     let mut rows: Vec<String> = Vec::new();
-    let label = |k: &str| fg(&t.dim, k);
+    let label = |k: &str| p.fg(&t.dim, k);
 
     for item in &cfg.tooltip.items {
         match item.as_str() {
             "model" => {
                 if let Some(m) = &state.model {
-                    rows.push(bold_fg(&t.accent, &pango_escape(m)));
+                    rows.push(p.bold_fg(&t.accent, &pango_escape(m)));
                     rows.push(SEP.into());
                 } else if cfg.tooltip.on_missing == OnMissing::Error {
-                    rows.push(format!("{} {}", label("Model"), fg(&t.error, "n/d")));
+                    rows.push(format!("{} {}", label("Model"), p.fg(&t.error, "n/d")));
                 }
             }
             "status" if state.status.is_some() => {
                 rows.push(format!(
                     "{} {}",
-                    fg(status_dot(state, t), "●"),
-                    fg(&t.text, status_text(state.status.as_ref()))
+                    p.fg(status_dot(state, t), "●"),
+                    p.fg(&t.text, status_text(state.status.as_ref()))
                 ));
             }
             // The literal text on the printer's front panel ("Ready", "Paper jam in tray 2", ...).
@@ -297,7 +289,7 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors) -> 
                     rows.push(format!(
                         "{} {}",
                         label("Panel"),
-                        fg(&t.accent, &pango_escape(d))
+                        p.fg(&t.accent, &pango_escape(d))
                     ));
                 }
             }
@@ -305,7 +297,7 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors) -> 
             "alerts" => {
                 for r in &state.reasons {
                     let (txt, color) = reason_display(r, t);
-                    rows.push(fg(color, &format!("\u{26a0} {}", pango_escape(&txt))));
+                    rows.push(p.fg(color, &format!("\u{26a0} {}", pango_escape(&txt))));
                 }
             }
             "supplies" => {
@@ -331,19 +323,16 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors) -> 
                     let cells = supply_cells(s).unwrap_or_else(|| "     ".into());
                     rows.push(format!(
                         "{} {}{}  {}  {}{}",
-                        fg(swatch_color(s.color), "●"),
-                        fg(&t.text, &pango_escape(&lbl)),
+                        p.fg(palette::swatch_on_surface(s.color, t), "●"),
+                        p.fg(&t.text, &pango_escape(&lbl)),
                         lpad,
-                        fg(bar_col, &cells),
+                        p.fg(bar_col, &cells),
                         vpad,
-                        fg(bar_col, &val)
+                        p.fg(bar_col, &val)
                     ));
                 }
                 if state.supplies.len() > cap {
-                    rows.push(fg(
-                        &t.dim,
-                        &format!("   +{} more", state.supplies.len() - cap),
-                    ));
+                    rows.push(p.fg(&t.dim, &format!("   +{} more", state.supplies.len() - cap)));
                 }
             }
             "paper" => {
@@ -359,27 +348,34 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors) -> 
                     let npad = " ".repeat(name_w.saturating_sub(tray.name.chars().count()));
                     rows.push(format!(
                         "{} {}{}  {}",
-                        label("\u{f0a48}"), // tray glyph
-                        fg(&t.dim, &pango_escape(&tray.name)),
+                        // nf-md-tray_full: a tray holding sheets. (U+F0A48,
+                        // used before, is nf-md-exit_run — a person running
+                        // through a doorway.)
+                        label("\u{f1296}"),
+                        p.fg(&t.dim, &pango_escape(&tray.name)),
                         npad,
-                        fg(&t.text, &level_str(tray.level))
+                        p.fg(&t.text, &level_str(tray.level))
                     ));
                 }
                 if state.paper.len() > cap {
-                    rows.push(fg(&t.dim, &format!("   +{} more", state.paper.len() - cap)));
+                    rows.push(p.fg(&t.dim, &format!("   +{} more", state.paper.len() - cap)));
                 }
             }
             "jobs" => {
                 if let Some(j) = state.jobs {
-                    rows.push(format!("{} {}", label("Jobs"), fg(&t.text, &j.to_string())));
+                    rows.push(format!(
+                        "{} {}",
+                        label("Jobs"),
+                        p.fg(&t.text, &j.to_string())
+                    ));
                 }
             }
             "pages" | "impressions" => {
-                if let Some(p) = state.pages {
+                if let Some(pages) = state.pages {
                     rows.push(format!(
                         "{} {}",
                         label("Impressions"),
-                        fg(&t.text, &p.to_string())
+                        p.fg(&t.text, &pages.to_string())
                     ));
                 }
             }
@@ -391,8 +387,22 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors) -> 
         rows.pop();
     }
     if rows.is_empty() {
-        rows.push(fg(&t.dim, "no data"));
+        rows.push(p.fg(&t.dim, "no data"));
     }
+
+    // House freshness footer: a separator rule, then the clock glyph
+    // (nf-md-clock_outline, U+F0150) and "Updated HH:MM" — the same closing line every
+    // sibling widget uses, in the Omarchy shell panel and here alike. printbar
+    // queries the printer on every invocation, so the stamp is the moment this
+    // tooltip was built.
+    rows.push(SEP.into());
+    rows.push(p.fg(
+        &t.dim,
+        &format!(
+            "\u{f0150}  Updated {}",
+            chrono::Local::now().format("%H:%M")
+        ),
+    ));
 
     let width = rows
         .iter()
@@ -407,28 +417,28 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors) -> 
     let frame = cfg.tooltip.frame;
     let mut out: Vec<String> = Vec::new();
     if frame {
-        out.push(top_border(width, &t.border));
+        out.push(p.top_border(width, &t.border));
     }
     for r in &rows {
         if r == SEP {
             if frame {
-                out.push(separator(width, &t.border, &t.dim));
+                out.push(p.separator(width, &t.border, &t.dim));
             } else {
-                out.push(fg(&t.dim, &"─".repeat(width)));
+                out.push(p.fg(&t.dim, &"─".repeat(width)));
             }
         } else if frame {
             let pad = " ".repeat(width.saturating_sub(visible_len(r)));
             out.push(format!(
                 "{} {r}{pad} {}",
-                fg(&t.border, "│"),
-                fg(&t.border, "│")
+                p.fg(&t.border, "│"),
+                p.fg(&t.border, "│")
             ));
         } else {
             out.push(r.clone());
         }
     }
     if frame {
-        out.push(bottom_border(width, &t.border));
+        out.push(p.bottom_border(width, &t.border));
     }
 
     let body = out.join("\n");
@@ -442,12 +452,26 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors) -> 
     }
 }
 
-pub fn render(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors) -> WaybarOutput {
+pub fn render(
+    state: &PrinterState,
+    cfg: &PrinterConfig,
+    t: &ThemeColors,
+    colors: ColorMode,
+) -> WaybarOutput {
     let (text, err) = render_template(&cfg.bar.format, state, cfg.bar.on_missing);
+    // printbar paints nothing in the bar itself — but `bar.format` is the user's
+    // own string, so a monochrome bar has to be swept clean of any markup it
+    // brought along. `class`/`alt` never change: they are the machine contract
+    // that lets a monochrome user do the coloring from their own CSS.
+    let text = if colors.bar {
+        text
+    } else {
+        strip_color_markup(&text)
+    };
     let class = worst_class(state, cfg, err);
     WaybarOutput {
         text,
-        tooltip: build_tooltip(state, cfg, t),
+        tooltip: build_tooltip(state, cfg, t, Paint::new(colors.tooltip)),
         alt: class.clone(),
         class: vec![class],
     }
@@ -498,6 +522,24 @@ mod tests {
     }
 
     #[test]
+    fn printer_strings_cannot_inject_markup_into_the_bar() {
+        // Waybar renders `text` as Pango markup, and the model comes off the
+        // wire. Unescaped, `&` alone is enough to blank the whole bar.
+        let st = PrinterState {
+            model: Some("Smith & Sons <Lab> \"A\"".into()),
+            name: Some("a<b>c".into()),
+            ..Default::default()
+        };
+        let (text, _) = render_template("{model}|{name}", &st, OnMissing::Hide);
+        assert_eq!(text, "Smith &amp; Sons &lt;Lab&gt; \"A\"|a&lt;b&gt;c");
+        assert!(!text.contains("<Lab>"));
+
+        // The format's OWN markup is the user's and survives untouched.
+        let (text, _) = render_template("<b>{model}</b>", &st, OnMissing::Hide);
+        assert!(text.starts_with("<b>") && text.ends_with("</b>"));
+    }
+
+    #[test]
     fn missing_token_error_mode() {
         let st = PrinterState::default();
         let (text, err) = render_template("{supply_min}", &st, OnMissing::Error);
@@ -542,10 +584,11 @@ mod tests {
             st.supplies
                 .push(consumed(&format!("S{i}"), Color::Other, 50));
         }
-        let tip = build_tooltip(&st, &c, &t);
+        let tip = build_tooltip(&st, &c, &t, Paint::new(true));
         assert!(tip.contains("+8 more"));
-        // 12 supply rows + "+8 more" row → 13 data rows, + 2 borders
-        assert_eq!(tip.lines().count(), 12 + 1 + 2);
+        // 12 supply rows + "+8 more" row → 13 data rows, then the freshness
+        // footer (rule + "Updated HH:MM"), + 2 borders
+        assert_eq!(tip.lines().count(), 12 + 1 + 2 + 2);
     }
 
     #[test]
@@ -555,8 +598,124 @@ mod tests {
         c.tooltip.items = vec!["supplies".into()];
         let mut st = PrinterState::default();
         st.supplies.push(consumed("Black", Color::Black, 50));
-        let tip = build_tooltip(&st, &c, &t);
+        let tip = build_tooltip(&st, &c, &t, Paint::new(true));
         assert!(!tip.contains('╭') && !tip.contains('╰') && !tip.contains('│'));
         assert!(!tip.contains("font_family"));
+    }
+
+    // ---- monochrome mode (`--no-color`) ------------------------------------
+
+    /// A printer with something to say on every tooltip row, and a bar format
+    /// whose own markup the user wrote.
+    fn colorful() -> (PrinterConfig, PrinterState) {
+        let mut c = cfg();
+        c.bar.format = "<span foreground='#ff0000'>\u{f042a}</span> {supply_min}%".into();
+        c.tooltip.items = vec![
+            "model".into(),
+            "status".into(),
+            "alerts".into(),
+            "display".into(),
+            "supplies".into(),
+            "paper".into(),
+            "jobs".into(),
+            "impressions".into(),
+        ];
+        c.tooltip.frame = true;
+        let mut st = PrinterState {
+            model: Some("HP M477fdw".into()),
+            status: Some(Status::Stopped),
+            display: Some("Paper jam in tray 2".into()),
+            jobs: Some(3),
+            pages: Some(12345),
+            ..Default::default()
+        };
+        st.reasons.push(Reason::Jam);
+        st.supplies.push(consumed("Black", Color::Black, 4));
+        st.supplies.push(consumed("Cyan", Color::Cyan, 64));
+        st.paper.push(crate::model::InputTray {
+            name: "Tray 2".into(),
+            level: Level::Pct(80),
+            max_capacity: None,
+            empty: false,
+        });
+        (c, st)
+    }
+
+    fn has_color(s: &str) -> bool {
+        s.contains("foreground") || s.contains('#')
+    }
+
+    #[test]
+    fn each_of_the_four_states_paints_the_right_surface() {
+        let t = ThemeColors::default();
+        let (c, st) = colorful();
+        let case = |m: ColorMode| render(&st, &c, &t, m);
+
+        let full = case(ColorMode::FULL);
+        assert!(has_color(&full.text) && has_color(&full.tooltip));
+
+        let none = case(ColorMode::PLAIN_ALL);
+        assert!(!has_color(&none.text) && !has_color(&none.tooltip));
+
+        let plain_bar = case(ColorMode::PLAIN_BAR);
+        assert!(!has_color(&plain_bar.text) && has_color(&plain_bar.tooltip));
+
+        let plain_tip = case(ColorMode::PLAIN_TOOLTIP);
+        assert!(has_color(&plain_tip.text) && !has_color(&plain_tip.tooltip));
+    }
+
+    #[test]
+    fn monochrome_keeps_the_class_contract_and_the_data() {
+        let t = ThemeColors::default();
+        let (c, st) = colorful();
+        let full = render(&st, &c, &t, ColorMode::FULL);
+        let mono = render(&st, &c, &t, ColorMode::PLAIN_ALL);
+        // The CSS classes are how a monochrome user styles the bar themselves.
+        assert_eq!(mono.class, full.class);
+        assert_eq!(mono.class, vec!["critical".to_string()]);
+        assert_eq!(mono.alt, full.alt);
+        // The bar keeps its glyph and its number, minus the user's color span.
+        assert_eq!(mono.text, "\u{f042a} 4%");
+    }
+
+    #[test]
+    fn monochrome_tooltip_keeps_every_structural_element() {
+        let t = ThemeColors::default();
+        let (c, st) = colorful();
+        let full = render(&st, &c, &t, ColorMode::FULL);
+        let mono = render(&st, &c, &t, ColorMode::PLAIN_ALL);
+        // Same rows, same box, same glyphs, same words — only the hues are gone.
+        assert_eq!(mono.tooltip.lines().count(), full.tooltip.lines().count());
+        for needle in [
+            "╭",
+            "╰",
+            "│",
+            "─", // the frame
+            "●",
+            "\u{26a0}",
+            "\u{f1296}", // status dot, alert, tray glyphs
+            "▰",
+            "▱", // the level cells
+            "Paper jam",
+            "Paper jam in tray 2",
+            "Stopped",
+            "Black",
+            "4%",
+            "Tray 2",
+            "12345",
+        ] {
+            assert!(
+                mono.tooltip.contains(needle),
+                "monochrome tooltip lost {needle:?}"
+            );
+        }
+        // The model header keeps its weight, and the font pin survives.
+        assert!(mono
+            .tooltip
+            .contains("<span font_weight='bold'>HP M477fdw</span>"));
+        assert!(mono.tooltip.contains("font_family="));
+        // Rows still line up: the frame is only square if the widths matched.
+        let widths: Vec<usize> = mono.tooltip.lines().map(visible_len).collect();
+        assert!(widths.windows(2).all(|w| w[0] == w[1]), "{widths:?}");
     }
 }

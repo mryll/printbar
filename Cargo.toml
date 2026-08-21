@@ -16,6 +16,9 @@ serde_json = "1"
 toml = "1"
 dirs = "6"
 unicode-width = "0.2"
+# Only used to stamp the tooltip freshness footer with a local HH:MM, the same
+# line every sibling widget ends its tooltip with.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 [dev-dependencies]
 assert_cmd = "2"

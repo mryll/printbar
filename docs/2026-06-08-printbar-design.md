@@ -127,7 +127,7 @@ Sentinels (RFC 3805 / CUPS `-1/-2/-3`) are DISTINCT states, not collapsed to one
 
 ```toml
 [printer.oficina]
-host = "192.168.1.70"          # enables IPP (+ SNMP if snmp.enabled); omit for USB-only
+host = "192.0.2.70"          # enables IPP (+ SNMP if snmp.enabled); omit for USB-only
 ipp_path = "/ipp/print"        # default; configurable for non-standard printers
 cups = "HP_M477fdw"            # optional: enables the CUPS/local IPP path (USB/local)
 timeout = 4                    # per-source seconds (protocol-level)
@@ -169,7 +169,7 @@ Note: `interval` is NOT a printbar key — Waybar owns the poll interval in its 
 
 **Tooltip — MUST match `meteobar`/`tickerbar` style:**
 - Framed box: `╭─…─╮` / `│` / `╰─…─╯`, separators `─`/`│`, in theme border color.
-- Colors from `~/.config/omarchy/current/theme/colors.toml` into `ThemeColors { border, text, dim, accent, green, yellow, orange, error }` (same struct/fields/fallback as `meteobar/src/theme.rs`).
+- Colors from `~/.local/state/omarchy/current/theme/colors.toml` (Omarchy 4.x state dir, `XDG_STATE_HOME` honored; legacy `~/.config/omarchy/...` kept as a fallback) into `ThemeColors { border, text, dim, accent, green, yellow, orange, error }` (same struct/fields/fallback as `meteobar/src/theme.rs`).
 - Pango spans via shared `fg(color,text)` / `bold_fg(color,text)`; alignment via `visible_len()`. Pango markup, never HTML.
 - Supplies as labeled bars, e.g. `Cyan  ▰▰▰▰▱ 78%`, colored green/yellow/orange/error by `class`-aware threshold.
 - **Bounded growth**: supplies/trays/alerts respect `max_rows` with overflow folding ("+N more"), reusing tickerbar's row/column cap approach (`tickerbar/src/platform/render.rs:548`).
@@ -223,7 +223,7 @@ aur/
 - **Unit**: `merge` priority + usable-set selection + reasons add/dedupe + jobs/status/supplies priority; `render` token substitution + literal absorption + `on_missing` hide/error; threshold→class (Consumed vs Filled); SNMP sentinel handling; colorant-index join; pages aggregation.
 - **Fixtures** (offline, no network): captured IPP attribute sets + SNMP walks for: real HP M477fdw, an inkjet (named ink + tri-color), an unknown/sentinel-level case, a waste-tank case, malformed/short marker arrays, oversized supply/tray lists.
 - **Failure matrix**: single source fails; source times out; ALL sources fail (→ offline, valid JSON); SNMP partial/garbage never degrades IPP base.
-- **Smoke**: run against the real M477fdw (`192.168.1.70`) during dogfooding.
+- **Smoke**: run against the real M477fdw (`192.0.2.70`) during dogfooding.
 - Lints: `cargo clippy`; format `cargo fmt`.
 
 ## 14. Implementation sequencing
