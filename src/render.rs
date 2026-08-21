@@ -232,11 +232,26 @@ fn supply_label(s: &Supply) -> String {
     }
 }
 
-/// The 5-cell level bar, or `None` when the level is a sentinel (unknown/etc).
+/// Width of a level bar, in cells. The same 20 the sibling widgets draw, so a
+/// printbar tooltip and a claudebar tooltip stacked in one bar read as one
+/// product rather than two.
+const BAR_CELLS: usize = 20;
+
+/// The level bar, or `None` when the level is a sentinel (unknown/etc).
+///
+/// Five cells used to carry the whole 0..100 range through `div_ceil(20)`, which
+/// rounded UP to the next fifth: 82% drew a completely full bar, indis-
+/// tinguishable from 100%, and 46% drew 60%. Twenty cells at 5% each, rounding
+/// down, means the bar can no longer claim more than the printer reported.
 fn supply_cells(s: &Supply) -> Option<String> {
     s.level.as_pct().map(|p| {
-        let filled = (p as usize).div_ceil(20);
-        (0..5).map(|i| if i < filled { '▰' } else { '▱' }).collect()
+        // A level that is not zero never draws an empty bar: 4% is the case a
+        // reader most needs to see, and rounding it to nothing hides it.
+        let raw = (p.min(100) as usize) * BAR_CELLS / 100;
+        let filled = if p > 0 { raw.max(1) } else { 0 };
+        (0..BAR_CELLS)
+            .map(|i| if i < filled { '\u{2588}' } else { '\u{2591}' })
+            .collect()
     })
 }
 
@@ -320,7 +335,7 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors, p: 
                     let val = level_str(s.level);
                     let vpad = " ".repeat(val_w.saturating_sub(val.chars().count()));
                     let bar_col = supply_color(s, cfg, t);
-                    let cells = supply_cells(s).unwrap_or_else(|| "     ".into());
+                    let cells = supply_cells(s).unwrap_or_else(|| " ".repeat(BAR_CELLS));
                     rows.push(format!(
                         "{} {}{}  {}  {}{}",
                         p.fg(palette::swatch_on_surface(s.color, t), "●"),
@@ -694,8 +709,8 @@ mod tests {
             "●",
             "\u{26a0}",
             "\u{f1296}", // status dot, alert, tray glyphs
-            "▰",
-            "▱", // the level cells
+            "\u{2588}",
+            "\u{2591}", // the level cells
             "Paper jam",
             "Paper jam in tray 2",
             "Stopped",

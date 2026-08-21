@@ -286,8 +286,12 @@ for s in "${SUPPLIES[@]}"; do
   swatch="$(swatch_for "$colorant")"
   lbl="${colorant^}"
   val="${pct}%"
-  filled=$(((pct + 19) / 20))
-  cells="$(repeat "▰" "$filled")$(repeat "▱" $((5 - filled)))"
+  # 20 celdas al 5%, redondeando hacia abajo — igual que supply_cells() en el
+  # binario. Con 5 celdas y redondeo hacia arriba, 82% dibujaba la barra llena.
+  filled=$((pct * 20 / 100))
+  # un nivel distinto de cero nunca dibuja la barra vacía
+  (( pct > 0 && filled == 0 )) && filled=1
+  cells="$(repeat "█" "$filled")$(repeat "░" $((20 - filled)))"
   case "$sstate" in
     critical) bc="$C_ERROR" ;;
     warn) bc="$C_ORANGE" ;;
