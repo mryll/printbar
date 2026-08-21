@@ -74,6 +74,8 @@ enabled = true               # explicit; community alone does NOT enable SNMP
 community = "public"
 ```
 
+Run `printbar --help` for the full reference: the usage line, every flag, and the format placeholders.
+
 Add the module to your Waybar configuration file. The name of the section is the argument:
 
 ```jsonc
