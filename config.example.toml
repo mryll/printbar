@@ -18,6 +18,11 @@ format = "\U000f042a {supply_min}%"
 on_missing = "hide"          # "hide" | "error"
 
 [printer.oficina.tooltip]
+# The tooltip is pinned to this family — a Pango family LIST, tried in order.
+# It must be monospace: the rules are box-drawing characters, which in a
+# proportional font render far wider than letters, so the tooltip would size
+# itself to the rules and grow a dead margin to the right of the text.
+# tooltip_font = "JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, monospace"
 items = ["model", "status", "supplies", "paper", "jobs", "impressions"]
 on_missing = "hide"
 max_rows = 12

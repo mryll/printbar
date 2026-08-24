@@ -83,28 +83,6 @@ impl Paint {
             format!("<span font_weight='bold'>{text}</span>")
         }
     }
-
-    pub fn border_line(&self, content: &str, width: usize, border_color: &str) -> String {
-        let pad = width.saturating_sub(visible_len(content));
-        let right_pad = " ".repeat(pad);
-        format!(
-            "{} {content}{right_pad} {}",
-            self.fg(border_color, "│"),
-            self.fg(border_color, "│")
-        )
-    }
-
-    pub fn separator(&self, width: usize, border_color: &str, dim_color: &str) -> String {
-        self.border_line(&self.fg(dim_color, &"─".repeat(width)), width, border_color)
-    }
-
-    pub fn top_border(&self, width: usize, border_color: &str) -> String {
-        self.fg(border_color, &format!("╭{}╮", "─".repeat(width + 2)))
-    }
-
-    pub fn bottom_border(&self, width: usize, border_color: &str) -> String {
-        self.fg(border_color, &format!("╰{}╯", "─".repeat(width + 2)))
-    }
 }
 
 /// Pango attributes that paint something. Everything else on a `<span>` is
@@ -264,18 +242,15 @@ mod tests {
     }
 
     #[test]
-    fn monochrome_paint_emits_no_color_but_keeps_weight_and_frame() {
+    fn monochrome_paint_emits_no_color_but_keeps_weight() {
         let p = Paint::new(false);
         assert_eq!(p.fg("#fff", "x"), "x");
         assert_eq!(p.bold_fg("#fff", "x"), "<span font_weight='bold'>x</span>");
-        assert_eq!(p.top_border(3, "#fff"), "╭─────╮");
-        assert_eq!(p.border_line("ab", 4, "#fff"), "│ ab   │");
-        assert!(!p.separator(4, "#fff", "#888").contains("foreground"));
         // Structure is untouched: same visible width as the colored painter.
         let c = Paint::new(true);
         assert_eq!(
-            visible_len(&p.border_line("ab", 4, "#fff")),
-            visible_len(&c.border_line("ab", 4, "#fff"))
+            visible_len(&p.fg("#fff", "ab")),
+            visible_len(&c.fg("#fff", "ab"))
         );
     }
 

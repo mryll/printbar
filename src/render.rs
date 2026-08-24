@@ -1,5 +1,5 @@
 //! Render a `PrinterState` into Waybar JSON: bar from a token template (with
-//! literal-absorption on hidden tokens), framed/themed tooltip, and a worst-state class.
+//! literal-absorption on hidden tokens), themed tooltip, and a worst-state class.
 
 use crate::color::ColorMode;
 use crate::config::{OnMissing, PrinterConfig};
@@ -274,7 +274,7 @@ fn status_dot<'a>(state: &PrinterState, t: &'a ThemeColors) -> &'a str {
     }
 }
 
-/// Build the framed, themed tooltip from configured items. `p` decides whether
+/// Build the themed tooltip from configured items. `p` decides whether
 /// the theme colors are actually painted (see `--no-color`); everything
 /// structural — glyphs, level cells, box drawing, alignment — is unaffected.
 fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors, p: Paint) -> String {
@@ -426,45 +426,28 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors, p: 
         .max()
         .unwrap_or(0)
         .max(12);
-    // Framed = box drawn and the whole tooltip pinned to a Mono Nerd Font so rows
-    // stay aligned under any bar font. Plain (default) = no border/pin, renders in
-    // the user's font (nothing aligned to a right edge to misalign).
-    let frame = cfg.tooltip.frame;
-    let mut out: Vec<String> = Vec::new();
-    if frame {
-        out.push(p.top_border(width, &t.border));
-    }
-    for r in &rows {
-        if r == SEP {
-            if frame {
-                out.push(p.separator(width, &t.border, &t.dim));
+    // One tooltip shape, pinned to a monospace font. The pin is not decoration:
+    // the rules are made of ─, and in a proportional font that character is
+    // nearly twice as wide as a letter — the tooltip then sizes itself to the
+    // rules and grows a dead margin to the right of the text. Waybar draws the
+    // tooltip in a GTK window that IGNORES font-family from CSS, so the markup
+    // is the only place this can be said.
+    let out: Vec<String> = rows
+        .iter()
+        .map(|r| {
+            if r == SEP {
+                p.fg(&t.dim, &"─".repeat(width))
             } else {
-                out.push(p.fg(&t.dim, &"─".repeat(width)));
+                r.clone()
             }
-        } else if frame {
-            let pad = " ".repeat(width.saturating_sub(visible_len(r)));
-            out.push(format!(
-                "{} {r}{pad} {}",
-                p.fg(&t.border, "│"),
-                p.fg(&t.border, "│")
-            ));
-        } else {
-            out.push(r.clone());
-        }
-    }
-    if frame {
-        out.push(p.bottom_border(width, &t.border));
-    }
+        })
+        .collect();
 
     let body = out.join("\n");
-    if frame {
-        format!(
-            "<span font_family='{}'>{body}</span>",
-            pango_escape(&cfg.tooltip.frame_font).replace('\'', "&apos;")
-        )
-    } else {
-        body
-    }
+    format!(
+        "<span font_family='{}'>{body}</span>",
+        pango_escape(&cfg.tooltip.tooltip_font).replace('\'', "&apos;")
+    )
 }
 
 pub fn render(
@@ -602,20 +585,35 @@ mod tests {
         let tip = build_tooltip(&st, &c, &t, Paint::new(true));
         assert!(tip.contains("+8 more"));
         // 12 supply rows + "+8 more" row → 13 data rows, then the freshness
-        // footer (rule + "Updated HH:MM"), + 2 borders
-        assert_eq!(tip.lines().count(), 12 + 1 + 2 + 2);
+        // footer (rule + "Updated HH:MM")
+        assert_eq!(tip.lines().count(), 12 + 1 + 2);
     }
 
     #[test]
-    fn plain_tooltip_is_borderless_and_unpinned() {
+    fn the_tooltip_is_borderless_and_pinned() {
         let t = ThemeColors::default();
-        let mut c = cfg(); // frame defaults to false → plain
+        let mut c = cfg();
         c.tooltip.items = vec!["supplies".into()];
         let mut st = PrinterState::default();
         st.supplies.push(consumed("Black", Color::Black, 50));
         let tip = build_tooltip(&st, &c, &t, Paint::new(true));
         assert!(!tip.contains('╭') && !tip.contains('╰') && !tip.contains('│'));
-        assert!(!tip.contains("font_family"));
+        // The pin is what keeps the rules the same width as the text they
+        // underline; without it a proportional font stretches them.
+        assert!(tip.contains("font_family="));
+    }
+
+    #[test]
+    fn a_deprecated_frame_setting_changes_nothing() {
+        let t = ThemeColors::default();
+        let mut c = cfg();
+        c.tooltip.items = vec!["supplies".into()];
+        let mut st = PrinterState::default();
+        st.supplies.push(consumed("Black", Color::Black, 50));
+        let without = build_tooltip(&st, &c, &t, Paint::new(true));
+        c.tooltip.frame = true; // still accepted, does nothing
+        let with = build_tooltip(&st, &c, &t, Paint::new(true));
+        assert_eq!(without, with);
     }
 
     // ---- monochrome mode (`--no-color`) ------------------------------------
@@ -702,10 +700,7 @@ mod tests {
         // Same rows, same box, same glyphs, same words — only the hues are gone.
         assert_eq!(mono.tooltip.lines().count(), full.tooltip.lines().count());
         for needle in [
-            "╭",
-            "╰",
-            "│",
-            "─", // the frame
+            "─", // the rules
             "●",
             "\u{26a0}",
             "\u{f1296}", // status dot, alert, tray glyphs
@@ -729,8 +724,9 @@ mod tests {
             .tooltip
             .contains("<span font_weight='bold'>HP M477fdw</span>"));
         assert!(mono.tooltip.contains("font_family="));
-        // Rows still line up: the frame is only square if the widths matched.
-        let widths: Vec<usize> = mono.tooltip.lines().map(visible_len).collect();
-        assert!(widths.windows(2).all(|w| w[0] == w[1]), "{widths:?}");
+        // Dropping color must not change any row's geometry.
+        let full_widths: Vec<usize> = full.tooltip.lines().map(visible_len).collect();
+        let mono_widths: Vec<usize> = mono.tooltip.lines().map(visible_len).collect();
+        assert_eq!(full_widths, mono_widths);
     }
 }

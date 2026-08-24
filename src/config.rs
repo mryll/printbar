@@ -56,14 +56,26 @@ pub struct TooltipCfg {
     pub on_missing: OnMissing,
     #[serde(default = "default_max_rows")]
     pub max_rows: usize,
-    /// Draw the framed tooltip box and pin `JetBrainsMono Nerd Font Mono` so rows
-    /// stay aligned under any bar font. Off (default) = plain, borderless, no font
-    /// pin — renders in the user's font; needs no specific font installed.
+    /// DEPRECATED, still accepted so an existing config keeps loading. It drew
+    /// a bordered card around the tooltip and now does nothing. Read nowhere on
+    /// purpose: the point is that an old `frame = true` neither errors nor
+    /// changes what is drawn.
     #[serde(default)]
+    #[allow(dead_code)]
     pub frame: bool,
-    /// Font family pinned in framed mode — must be a complete Mono Nerd Font.
-    #[serde(default = "default_frame_font")]
-    pub frame_font: String,
+    /// The tooltip is pinned to this family. A Pango family LIST, not one name:
+    /// Pango tries them in order and falls through when one is not installed —
+    /// the Arch package ttf-jetbrains-mono-nerd does NOT ship the "…Mono"
+    /// family, so pinning only that name fell back to the system's proportional
+    /// font without saying so.
+    ///
+    /// It must be monospace: the tooltip's rules are box-drawing characters,
+    /// which in a proportional font render far wider than letters, so the
+    /// tooltip sizes itself to the rules and grows a dead margin to the right
+    /// of the text. Waybar draws the tooltip in a GTK window that ignores
+    /// font-family from CSS, so the markup is the only place to say it.
+    #[serde(default = "default_tooltip_font", alias = "frame_font")]
+    pub tooltip_font: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -125,8 +137,8 @@ fn default_tooltip_items() -> Vec<String> {
 fn default_max_rows() -> usize {
     12
 }
-fn default_frame_font() -> String {
-    "JetBrainsMono Nerd Font Mono".into()
+fn default_tooltip_font() -> String {
+    "JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, monospace".into()
 }
 fn default_low() -> u8 {
     15
@@ -158,7 +170,7 @@ impl Default for TooltipCfg {
             on_missing: OnMissing::default(),
             max_rows: default_max_rows(),
             frame: false,
-            frame_font: default_frame_font(),
+            tooltip_font: default_tooltip_font(),
         }
     }
 }

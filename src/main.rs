@@ -19,7 +19,6 @@ use sources::ipp::IppSource;
 use sources::snmp::SnmpSource;
 use sources::{run_sources, Source, SourceKind, Target};
 
-
 /// The reference `--help` prints. Same shape as the shell widgets in the
 /// family: a usage line, then one paragraph per flag, then the subcommands.
 /// Plain text on stdout, exit 0 — the exit-0 JSON contract is for the widget
@@ -217,7 +216,10 @@ mod tests {
         for flag in ["--help", "--json", "--no-color"] {
             assert!(HELP.contains(flag), "HELP does not document {flag}");
         }
-        assert!(HELP.contains("action"), "HELP does not document the action subcommand");
+        assert!(
+            HELP.contains("action"),
+            "HELP does not document the action subcommand"
+        );
     }
     use super::*;
 

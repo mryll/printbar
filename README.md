@@ -5,11 +5,27 @@
 
 A printer monitor for [Waybar](https://github.com/Alexays/Waybar) and the [Omarchy](https://omarchy.org) shell. It shows the status of the printer, the supply levels, the trays, the queue and the text on the front panel of the printer. It does this for **any** printer, on the network or on USB, and it does not depend on one vendor.
 
-One collector, two frontends:
+The same core drives both frontends, so a number reads the same on either one:
 
-| Waybar tooltip | Omarchy shell panel |
+| The Omarchy shell plugin | The Waybar module |
 | :---: | :---: |
-| <img src="screenshots/waybar-tooltip.png" alt="printbar's Waybar tooltip" width="316"> | <img src="screenshots/omarchy-panel.png" alt="printbar's Omarchy shell panel" width="362"> |
+| <img src="screenshots/omarchy-desktop.png" alt="printbar in the Omarchy shell: the bar face and the printer panel"> | <img src="screenshots/waybar-desktop.png" alt="printbar in Waybar: the bar face and the printer tooltip"> |
+
+## Contents
+
+- [Why printbar?](#why-printbar)
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Theming](#theming)
+- [Instant updates](#instant-updates)
+- [Omarchy shell plugin](#omarchy-shell-plugin)
+- [Structured JSON output](#structured-json-output)
+- [How it works](#how-it-works)
+- [Troubleshooting](#troubleshooting)
+- [Related](#related)
 
 ## Why printbar?
 
@@ -94,6 +110,11 @@ Then add `"custom/printbar"` to a `modules-*` list. Start Waybar again.
 
 <p align="center">
   <img src="screenshots/waybar-bar.png" alt="printbar in Waybar" width="72">
+</p>
+
+<p align="center">
+  <em>Move the pointer onto it to see the supplies, the trays and the queue:</em><br><br>
+  <img src="screenshots/waybar-tooltip.png" alt="The printbar tooltip: status, supplies, trays and queue" width="316">
 </p>
 
 The full reference of the options is in [`config.example.toml`](config.example.toml).
@@ -238,11 +259,11 @@ systemctl --user enable --now printbar-watch
 printbar also has a native plugin for the bar of the [Omarchy](https://omarchy.org) shell. It uses the same collector, but it renders a real widget and not a Pango tooltip.
 
 <p align="center">
-  <img src="screenshots/omarchy-desktop.png" alt="printbar in the Omarchy bar, with its panel open" width="960">
+  <img src="screenshots/omarchy-bar.png" alt="printbar in the Omarchy shell bar" width="42">
 </p>
 
 <p align="center">
-  <img src="screenshots/omarchy-bar.png" alt="printbar in the Omarchy shell bar" width="42">
+  <img src="screenshots/omarchy-panel.png" alt="The printbar panel: status, supplies, trays and queue" width="362">
 </p>
 
 The bar shows a printer glyph. The glyph is muted when the printer is idle, and it shows the count of the jobs when the printer prints. An urgent tint shows a jam, a critical state or an offline state.
@@ -298,6 +319,13 @@ The panel follows the live theme tokens of the shell, so it changes its colors i
 |:---:|:---:|:---:|
 | ![Ristretto](screenshots/omarchy-theme-ristretto.png) | ![Nord](screenshots/omarchy-theme-nord.png) | ![Kanagawa](screenshots/omarchy-theme-kanagawa.png) |
 
+The plugin also answers the shell's IPC, so a keybind or a script can drive it without the mouse:
+
+```bash
+qs ipc call mryll.printbar toggle    # open or close the panel
+qs ipc call mryll.printbar refresh   # fetch now, without opening anything
+```
+
 ## Structured JSON output
 
 `printbar <name> --json` prints one document with raw data only. It has no Pango markup and no pre-drawn bars. The Omarchy plugin reads this document, and all other frontends can also use it. The `schema_version` field gives its version. Like the Waybar mode, it always exits with code 0. A failure gives `"state": "error"` and `"error": {"message": …}`, and the fields of the reading are empty.
@@ -335,3 +363,13 @@ IPP and the local CUPS queue use the same attribute parser. SNMP adds the page c
 - **Does the widget show "not installed or not on PATH"?** The Omarchy plugin runs `printbar` from `PATH`. Run `make install PREFIX=~/.local`. Then make sure that `~/.local/bin` is in the PATH that the shell had when it started.
 - **Did you edit the QML and nothing changed?** Run `omarchy restart shell`.
 - **Does the push service not operate?** It needs CUPS with D-Bus notifications. Check `systemctl --user status printbar-watch`. Then make sure that the `signal` of your module agrees with `PRINTBAR_WAYBAR_SIGNAL`.
+
+## Related
+
+- [claudebar](https://github.com/mryll/claudebar) — Claude AI plan usage
+- [codexbar](https://github.com/mryll/codexbar) — OpenAI Codex subscription usage
+- [logibar](https://github.com/mryll/logibar) — the battery of Logitech devices
+- [meteobar](https://github.com/mryll/meteobar) — the weather, from Open-Meteo
+- [tickerbar](https://github.com/mryll/tickerbar) — prices of crypto, stocks, indices, commodities and forex
+- [Omarchy](https://github.com/basecamp/omarchy) — the Linux setup for these widgets
+- [Waybar](https://github.com/Alexays/Waybar) — the status bar for Wayland
