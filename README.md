@@ -110,12 +110,12 @@ Add the module to your Waybar configuration file. The name of the section is the
 Then add `"custom/printbar"` to a `modules-*` list. Start Waybar again.
 
 <p align="center">
-  <img src="screenshots/waybar-bar.png" alt="printbar in Waybar" width="72">
+  <img src="screenshots/waybar-bar.png" alt="printbar in Waybar" width="40">
 </p>
 
 <p align="center">
   <em>Move the pointer onto it to see the supplies, the trays and the queue:</em><br><br>
-  <img src="screenshots/waybar-tooltip.png" alt="The printbar tooltip: status, supplies, trays and queue" width="316">
+  <img src="screenshots/waybar-tooltip.png" alt="The printbar tooltip: status, supplies, trays and queue" width="299">
 </p>
 
 The full reference of the options is in [`config.example.toml`](config.example.toml).
@@ -226,7 +226,7 @@ Plain means no color markup on that surface. Nothing else changes. The printer g
 
 | Monochrome tooltip | Monochrome panel (`"colorMode": "none"`) |
 | :---: | :---: |
-| <img src="screenshots/waybar-tooltip-mono.png" alt="printbar's Waybar tooltip in monochrome" width="316"> | <img src="screenshots/omarchy-panel-mono.png" alt="printbar's Omarchy panel in monochrome" width="358"> |
+| <img src="screenshots/waybar-tooltip-mono.png" alt="printbar's Waybar tooltip in monochrome" width="299"> | <img src="screenshots/omarchy-panel-mono.png" alt="printbar's Omarchy panel in monochrome" width="358"> |
 
 printbar also obeys [`NO_COLOR`](https://no-color.org). A value that is not empty has the same effect as `--no-color=all`. An explicit flag on the command line always has more priority. For example, `--no-color=bar` keeps the tooltip colored with `NO_COLOR`, because the flag is the more specific instruction.
 
@@ -276,7 +276,7 @@ systemctl --user enable --now printbar-watch
 printbar also has a native plugin for the bar of the [Omarchy](https://omarchy.org) shell. It uses the same collector, but it renders a real widget and not a Pango tooltip.
 
 <p align="center">
-  <img src="screenshots/omarchy-bar.png" alt="printbar in the Omarchy shell bar" width="42">
+  <img src="screenshots/omarchy-bar.png" alt="printbar in the Omarchy shell bar" width="31">
 </p>
 
 <p align="center">
