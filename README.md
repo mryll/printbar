@@ -20,6 +20,7 @@ The same core drives both frontends, so a number reads the same on either one:
 - [Quick start](#quick-start)
 - [Configuration](#configuration)
 - [Theming](#theming)
+- [Tooltip font](#tooltip-font)
 - [Instant updates](#instant-updates)
 - [Omarchy shell plugin](#omarchy-shell-plugin)
 - [Structured JSON output](#structured-json-output)
@@ -55,7 +56,7 @@ The same core drives both frontends, so a number reads the same on either one:
 
 - [Waybar](https://github.com/Alexays/Waybar), or the [Omarchy](https://omarchy.org) shell, or both.
 - A network printer (IPP/SNMP), or a configured CUPS queue (this includes USB), or both.
-- A [Nerd Font](https://www.nerdfonts.com/) for the icons. It is recommended for all modes, and it is necessary for the framed tooltip (`frame = true`).
+- A [Nerd Font](https://www.nerdfonts.com/) for the icons, and for the rules that line up the tooltip's columns. Refer to [Tooltip font](#tooltip-font).
 - Optional: `cups` (CUPS source, queue action, instant push), `libnotify` (notifications), `xdg-utils` (click actions).
 
 ## Installation
@@ -144,11 +145,9 @@ on_missing = "hide"                   # "hide" | "error"
 [printer.office.tooltip]
 items = ["model", "status", "alerts", "display", "supplies", "paper", "jobs", "impressions"]
 max_rows = 12
-# Draw the bordered box and pin a Mono Nerd Font, so the rows stay aligned under any bar font.
-# Off (the default) = plain, borderless, in your own font.
-frame = false
-# The font pinned when frame = true. It must be a complete Mono Nerd Font.
-frame_font = "JetBrainsMono Nerd Font Mono"
+# The family the tooltip is pinned to — a Pango family list, tried in order.
+# It must be monospace. Refer to "Tooltip font".
+tooltip_font = "JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, monospace"
 ```
 
 ### Thresholds and styling
@@ -242,6 +241,24 @@ printbar also obeys [`NO_COLOR`](https://no-color.org). A value that is not empt
 #custom-printbar.warn     { color: #e5c07b; }
 #custom-printbar.critical { color: #e06c75; }
 ```
+
+## Tooltip font
+
+The tooltip is pinned to a monospace font. That is not decoration: its rules are box-drawing characters, and in a proportional font one of those is nearly twice as wide as a letter. The tooltip then sizes itself to the rules, and a dead margin opens to the right of the text. Waybar draws the tooltip in a GTK window that ignores `font-family` from your CSS, so the markup is the only place this can be said.
+
+The default is a **list** of families, tried in order:
+
+```toml
+[printer.<name>.tooltip]
+tooltip_font = "JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, monospace"
+```
+
+Pango falls through to the next name when one is not installed. This matters: the Arch package `ttf-jetbrains-mono-nerd` does **not** ship the `…Mono` family, so pinning that one name alone used to fall back to your system's proportional font without saying so.
+
+> [!NOTE]
+> **`frame` and `frame_font` are deprecated.** `frame` drew the tooltip as a bordered card. It is still accepted, so an existing config keeps loading, but it now does nothing; `frame_font` is an alias for `tooltip_font`.
+>
+> The box was a second way of drawing the same content — more code, more documentation, more screenshots — and it only lined up when the pinned font was a complete Mono Nerd Font. Pinning the font on the one remaining tooltip gives the alignment without the box.
 
 ## Instant updates
 
