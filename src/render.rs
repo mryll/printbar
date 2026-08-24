@@ -211,6 +211,28 @@ fn supply_color<'a>(s: &Supply, cfg: &PrinterConfig, t: &'a ThemeColors) -> &'a 
 /// Sentinel row rendered as a full-width section separator.
 const SEP: &str = "\u{1}sep";
 
+/// Sentinel prefix for a meter row parked until the tooltip's width is known.
+const METER: &str = "\u{1}meter";
+
+/// A supply row waiting for its geometry.
+///
+/// The bar has to reach the tooltip's right edge, and that edge is the widest
+/// TEXT row — which does not exist yet while the supplies are being built. So
+/// the row keeps its painted pieces here and the width pass applies the
+/// geometry afterwards. Every meter in one tooltip gets the SAME bar length:
+/// they stack, so a reader compares them against each other, and a per-row
+/// length would turn that comparison into a lie.
+struct MeterRow {
+    /// Everything left of the bar, already painted and padded.
+    lead: String,
+    /// Visible columns that `lead` occupies.
+    lead_w: usize,
+    color: String,
+    supply: Supply,
+    value: String,
+    value_w: usize,
+}
+
 /// Short, alignable supply label: the colorant name, else the kind, else the full name.
 fn supply_label(s: &Supply) -> String {
     let named = match s.color {
@@ -232,10 +254,17 @@ fn supply_label(s: &Supply) -> String {
     }
 }
 
-/// Width of a level bar, in cells. The same 20 the sibling widgets draw, so a
-/// printbar tooltip and a claudebar tooltip stacked in one bar read as one
-/// product rather than two.
-const BAR_CELLS: usize = 20;
+/// Bar geometry, shared with the sibling widgets so a printbar tooltip and a
+/// claudebar tooltip stacked in one bar read as one product rather than two.
+///
+/// The bar is no longer a fixed 20 cells: it stretches so the level lands on
+/// the tooltip's right edge, the column the widest text row ends on. The floor
+/// keeps a short tooltip readable; the ceiling stops one long row (a printer
+/// model, a panel message) from stretching the bar into a ruler.
+const BAR_MIN: usize = 20;
+const BAR_MAX: usize = 48;
+/// Smallest gap between the bar and the level that follows it.
+const BAR_GAP: usize = 2;
 
 /// The level bar, or `None` when the level is a sentinel (unknown/etc).
 ///
@@ -243,13 +272,13 @@ const BAR_CELLS: usize = 20;
 /// rounded UP to the next fifth: 82% drew a completely full bar, indis-
 /// tinguishable from 100%, and 46% drew 60%. Twenty cells at 5% each, rounding
 /// down, means the bar can no longer claim more than the printer reported.
-fn supply_cells(s: &Supply) -> Option<String> {
+fn supply_cells(s: &Supply, cells: usize) -> Option<String> {
     s.level.as_pct().map(|p| {
         // A level that is not zero never draws an empty bar: 4% is the case a
         // reader most needs to see, and rounding it to nothing hides it.
-        let raw = (p.min(100) as usize) * BAR_CELLS / 100;
+        let raw = (p.min(100) as usize) * cells / 100;
         let filled = if p > 0 { raw.max(1) } else { 0 };
-        (0..BAR_CELLS)
+        (0..cells)
             .map(|i| if i < filled { '\u{2588}' } else { '\u{2591}' })
             .collect()
     })
@@ -279,6 +308,7 @@ fn status_dot<'a>(state: &PrinterState, t: &'a ThemeColors) -> &'a str {
 /// structural — glyphs, level cells, box drawing, alignment — is unaffected.
 fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors, p: Paint) -> String {
     let mut rows: Vec<String> = Vec::new();
+    let mut meters: Vec<MeterRow> = Vec::new();
     let label = |k: &str| p.fg(&t.dim, k);
 
     for item in &cfg.tooltip.items {
@@ -324,27 +354,28 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors, p: 
                     .max()
                     .unwrap_or(0)
                     .min(12);
-                let val_w = shown
-                    .iter()
-                    .map(|s| level_str(s.level).chars().count())
-                    .max()
-                    .unwrap_or(0);
                 for s in &shown {
                     let lbl = supply_label(s);
                     let lpad = " ".repeat(label_w.saturating_sub(lbl.chars().count()));
                     let val = level_str(s.level);
-                    let vpad = " ".repeat(val_w.saturating_sub(val.chars().count()));
                     let bar_col = supply_color(s, cfg, t);
-                    let cells = supply_cells(s).unwrap_or_else(|| " ".repeat(BAR_CELLS));
-                    rows.push(format!(
-                        "{} {}{}  {}  {}{}",
-                        p.fg(palette::swatch_on_surface(s.color, t), "●"),
-                        p.fg(&t.text, &pango_escape(&lbl)),
-                        lpad,
-                        p.fg(bar_col, &cells),
-                        vpad,
-                        p.fg(bar_col, &val)
-                    ));
+                    // Parked, not rendered: the bar length is not known until
+                    // every other row exists. Refer to MeterRow.
+                    rows.push(format!("{METER}{}", meters.len()));
+                    meters.push(MeterRow {
+                        lead: format!(
+                            "{} {}{}  ",
+                            p.fg(palette::swatch_on_surface(s.color, t), "●"),
+                            p.fg(&t.text, &pango_escape(&lbl)),
+                            lpad
+                        ),
+                        // dot + space + label column + the two-space gap
+                        lead_w: label_w + 4,
+                        color: bar_col.to_string(),
+                        supply: (*s).clone(),
+                        value: p.fg(bar_col, &val),
+                        value_w: val.chars().count(),
+                    });
                 }
                 if state.supplies.len() > cap {
                     rows.push(p.fg(&t.dim, &format!("   +{} more", state.supplies.len() - cap)));
@@ -419,13 +450,47 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors, p: 
         ),
     ));
 
-    let width = rows
+    // The meters are skipped: their width is DERIVED from this number, so
+    // measuring them here would be circular.
+    let mut width = rows
         .iter()
-        .filter(|r| r.as_str() != SEP)
+        .filter(|r| r.as_str() != SEP && !r.starts_with(METER))
         .map(|r| visible_len(r))
         .max()
         .unwrap_or(0)
         .max(12);
+
+    // One bar length for every meter in this tooltip. The lead column (dot +
+    // label) is already uniform, and so is the level column, so the length
+    // follows from the right edge alone.
+    let lead_w = meters.iter().map(|m| m.lead_w).max().unwrap_or(0);
+    let value_w = meters.iter().map(|m| m.value_w).max().unwrap_or(0);
+    let bar_cells = width
+        .saturating_sub(lead_w + BAR_GAP + value_w)
+        .clamp(BAR_MIN, BAR_MAX);
+    if !meters.is_empty() {
+        // A clamp at the low end makes the meter row wider than every text
+        // row, so the rules grow to match it and the right edge stays one
+        // straight line.
+        width = width.max(lead_w + bar_cells + BAR_GAP + value_w);
+    }
+    for r in rows.iter_mut() {
+        let Some(idx) = r.strip_prefix(METER).and_then(|i| i.parse::<usize>().ok()) else {
+            continue;
+        };
+        let m = &meters[idx];
+        let cells = supply_cells(&m.supply, bar_cells).unwrap_or_else(|| " ".repeat(bar_cells));
+        // The gap absorbs the level's own width, so the LAST character of the
+        // level lands on the right edge whatever the level says.
+        let pad = width.saturating_sub(m.lead_w + bar_cells + m.value_w).max(1);
+        *r = format!(
+            "{}{}{}{}",
+            m.lead,
+            p.fg(&m.color, &cells),
+            " ".repeat(pad),
+            m.value
+        );
+    }
     // One tooltip shape, pinned to a monospace font. The pin is not decoration:
     // the rules are made of ─, and in a proportional font that character is
     // nearly twice as wide as a letter — the tooltip then sizes itself to the

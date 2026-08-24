@@ -9,6 +9,8 @@ Generic Waybar printer widget. One-shot Rust binary: collect (IPP + SNMP) → me
 - `palette.rs` owns every color printbar itself defines (severity from the theme, ink per colorant) and the supply ramp's stops. `supply_state` classifies against `supply_stops`, and `--json` publishes both, so the QML panel never keeps a second copy. The panel's own chrome still uses the shell's live `Color` tokens — deliberate, see the header comment in `omarchy/Panel.qml`.
 - Theme tests must never read the real environment: go through `load_from`/`dir_from`/`candidate_paths`, and pin `HOME` + the XDG dirs in `tests/cli.rs`.
 - Build: `make build`; install: `make install PREFIX=~/.local`. Lint: `cargo clippy`; format `cargo fmt`.
+- **A tooltip meter is PARKED, not rendered in place.** `build_tooltip` pushes a `METER<i>` sentinel row plus a `MeterRow` into `meters`, and the width pass resolves them. The bar has to reach the tooltip's right edge, and that edge is the widest TEXT row — which does not exist yet while the supplies are being built. The width pass MUST skip `SEP` and `METER` rows, or the measurement is circular. Every meter in one tooltip gets the SAME bar length: they stack, so a reader compares them against each other.
+- **`screenshots/demo/demo-data` RE-IMPLEMENTS the tooltip renderer in bash.** The README screenshots are made from it, so a change to `build_tooltip`'s geometry has to be mirrored there in the same commit, or the published screenshots stop showing the product.
 
 ## Release
 

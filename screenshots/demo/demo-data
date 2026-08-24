@@ -281,26 +281,25 @@ for s in "${SUPPLIES[@]}"; do
   ((${#lbl} > label_w)) && label_w=${#lbl}
   ((${#pct} + 1 > val_w)) && val_w=$((${#pct} + 1))
 done
+# Los medidores se aparcan y se resuelven después de medir el ancho: la barra
+# llega al borde derecho del tooltip, y ese borde es la fila de texto más
+# ancha, que todavía no existe. Misma mecánica que build_tooltip() en el
+# binario, y la razón de que las dos partes tengan que cambiar juntas.
+m_lbl=() m_lpad=() m_pct=() m_bc=() m_swatch=() m_val=()
 for s in "${SUPPLIES[@]}"; do
   IFS='|' read -r _name _kind colorant pct sstate <<<"$s"
   swatch="$(swatch_for "$colorant")"
   lbl="${colorant^}"
   val="${pct}%"
-  # 20 celdas al 5%, redondeando hacia abajo — igual que supply_cells() en el
-  # binario. Con 5 celdas y redondeo hacia arriba, 82% dibujaba la barra llena.
-  filled=$((pct * 20 / 100))
-  # un nivel distinto de cero nunca dibuja la barra vacía
-  (( pct > 0 && filled == 0 )) && filled=1
-  cells="$(repeat "█" "$filled")$(repeat "░" $((20 - filled)))"
   case "$sstate" in
     critical) bc="$C_ERROR" ;;
     warn) bc="$C_ORANGE" ;;
     *) bc="$C_GREEN" ;;
   esac
   lpad=$(pad $((label_w - ${#lbl})))
-  vpad=$(pad $((val_w - ${#val})))
-  row "● ${lbl}${lpad}  ${cells}  ${vpad}${val}" \
-    "$(paint "$swatch" "●") $(paint "$C_TEXT" "$lbl")${lpad}  $(paint "$bc" "$cells")  ${vpad}$(paint "$bc" "$val")"
+  row "METER:${#m_lbl[@]}" "METER:${#m_lbl[@]}"
+  m_lbl+=("$lbl"); m_lpad+=("$lpad"); m_pct+=("$pct")
+  m_bc+=("$bc"); m_swatch+=("$swatch"); m_val+=("$val")
 done
 
 # paper trays
@@ -319,11 +318,52 @@ done
 row "Jobs $JOBS" "$(paint "$C_DIM" "Jobs") $(paint "$C_TEXT" "$JOBS")"
 row "Impressions $IMPRESSIONS" "$(paint "$C_DIM" "Impressions") $(paint "$C_TEXT" "$IMPRESSIONS")"
 
+# El pie de la casa: la regla, el glifo de reloj (nf-md-clock_outline) y
+# "Updated HH:MM" — la misma línea de cierre que usan los seis widgets
+# hermanos. El binario la escribe siempre (build_tooltip), y el fixture no la
+# escribía: cada captura del README de printbar salía sin ella, o sea sin la
+# línea que hace que la familia se lea como una familia.
+_now=$(date +%H:%M)
+row "$SEP" "$SEP"
+row "󰅐  Updated $_now" "$(paint "$C_DIM" "󰅐  Updated $_now")"
+
 # The rule spans the widest row, like the real renderer's plain (unframed) mode.
+# Los medidores no se miden: su ancho SALE de este número, así que medirlos acá
+# sería circular.
 width=12
 for p in "${plain[@]}"; do
-  [[ $p == "$SEP" ]] && continue
+  [[ $p == "$SEP" || $p == METER:* ]] && continue
   ((${#p} > width)) && width=${#p}
+done
+
+# Una sola longitud de barra para todo el tooltip. Los medidores se apilan, y
+# el lector los compara entre sí: una longitud por fila convierte esa
+# comparación en una mentira.
+M_LEAD=$((label_w + 4))   # ● + espacio + columna de etiqueta + el hueco de 2
+M_GAP=2; M_MIN=20; M_MAX=48
+bar_cells=$((width - M_LEAD - M_GAP - val_w))
+((bar_cells < M_MIN)) && bar_cells=$M_MIN
+((bar_cells > M_MAX)) && bar_cells=$M_MAX
+if ((${#m_lbl[@]} > 0)); then
+  _rw=$((M_LEAD + bar_cells + M_GAP + val_w))
+  ((_rw > width)) && width=$_rw
+fi
+for i in "${!plain[@]}"; do
+  [[ ${plain[$i]} == METER:* ]] || continue
+  k=${plain[$i]#METER:}
+  # Redondeo hacia abajo, igual que supply_cells() en el binario. Con
+  # redondeo hacia arriba, 82% dibujaba la barra llena.
+  filled=$((m_pct[k] * bar_cells / 100))
+  # un nivel distinto de cero nunca dibuja la barra vacía
+  ((m_pct[k] > 0 && filled == 0)) && filled=1
+  cells="$(repeat "█" "$filled")$(repeat "░" $((bar_cells - filled)))"
+  # El hueco absorbe el ancho del propio nivel, así que el ÚLTIMO carácter del
+  # nivel cae en el borde derecho diga lo que diga el nivel.
+  vp=$((width - M_LEAD - bar_cells - ${#m_val[k]}))
+  ((vp < 1)) && vp=1
+  gap=$(pad "$vp")
+  plain[i]="● ${m_lbl[k]}${m_lpad[k]}  ${cells}${gap}${m_val[k]}"
+  rich[i]="$(paint "${m_swatch[k]}" "●") $(paint "$C_TEXT" "${m_lbl[k]}")${m_lpad[k]}  $(paint "${m_bc[k]}" "$cells")${gap}$(paint "${m_bc[k]}" "${m_val[k]}")"
 done
 
 tooltip=""
