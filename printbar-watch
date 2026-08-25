@@ -29,10 +29,17 @@ cat > "$subtest" <<'IPPT'
 IPPT
 
 subscribe() {
-  local p
-  for p in $(lpstat -e 2>/dev/null); do
-    ipptool -tv -d user="$USER" "ipp://localhost/printers/$p" "$subtest" >/dev/null 2>&1
-  done
+  # `lpstat -e` prints one queue name per line. Read them line by line instead
+  # of via `$(...)` word splitting: a name with a space or a glob character
+  # would otherwise split or expand, and the name is interpolated into a URL
+  # below. cups-browsed can create queue names from mDNS, so this is not fully
+  # local. `%` is percent-encoded so the name cannot alter the URL path.
+  local p enc
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    enc=${p//%/%25}
+    ipptool -tv -d user="$USER" "ipp://localhost/printers/$enc" "$subtest" >/dev/null 2>&1
+  done < <(lpstat -e 2>/dev/null)
 }
 
 # Re-subscribe periodically so a cupsd restart (which drops subscriptions) is tolerated.

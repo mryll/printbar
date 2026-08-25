@@ -64,7 +64,17 @@ Panel {
   readonly property string reportedName: report && report.name ? String(report.name) : ""
   readonly property var impressions: report && report.impressions !== null && report.impressions !== undefined ? report.impressions : null
 
-  readonly property string title: reportedModel || reportedName || printerName
+  // Everything the printer reports can carry markup, and the shell's own
+  // components (PanelHero here) keep Qt's AutoText default, where anything
+  // Qt::mightBeRichText() likes goes down the rich-text path — an <img> tag
+  // from a hostile printer would make the shell fetch a URL. Strip the
+  // markup-significant characters instead: lossy by design, because a printer
+  // name containing these is hostile, not decorative.
+  function plainForAutoText(s) {
+    return String(s).replace(/[<>&]/g, " ").replace(/\s+/g, " ").trim()
+  }
+
+  readonly property string title: plainForAutoText(reportedModel || reportedName || printerName)
   readonly property string statusLabel: status === "" ? "Unknown"
     : status.charAt(0).toUpperCase() + status.slice(1)
   readonly property string tooltipLine: title + " · " + statusLabel
@@ -580,7 +590,7 @@ Panel {
           PanelHero {
             width: parent.width
             title: root.title
-            meta: root.title !== root.printerName ? root.printerName : ""
+            meta: root.title !== root.plainForAutoText(root.printerName) ? root.plainForAutoText(root.printerName) : ""
             foreground: root.fg
             fontFamily: root.family
 
@@ -715,6 +725,7 @@ Panel {
                   spacing: Style.space(5)
 
                   Text {
+                    textFormat: Text.PlainText
                     anchors.verticalCenter: parent.verticalCenter
                     text: "" // nf-fa-warning
                     color: reasonPill.sev
@@ -941,6 +952,7 @@ Panel {
               spacing: Style.space(3)
 
               Text {
+                textFormat: Text.PlainText
                 text: "JOBS"
                 color: Qt.darker(root.fg, 1.55)
                 font.family: root.family
@@ -949,6 +961,7 @@ Panel {
                 font.letterSpacing: 1
               }
               Text {
+                textFormat: Text.PlainText
                 text: String(root.jobCount)
                 color: root.accent
                 font.family: root.family
@@ -962,6 +975,7 @@ Panel {
               spacing: Style.space(3)
 
               Text {
+                textFormat: Text.PlainText
                 text: "PAGES"
                 color: Qt.darker(root.fg, 1.55)
                 font.family: root.family
@@ -970,6 +984,7 @@ Panel {
                 font.letterSpacing: 1
               }
               Text {
+                textFormat: Text.PlainText
                 text: root.impressions !== null ? Number(root.impressions).toLocaleString(Qt.locale(), "f", 0) : ""
                 color: root.fg
                 font.family: root.family
@@ -980,6 +995,7 @@ Panel {
 
           // ---- First-poll placeholder.
           Text {
+            textFormat: Text.PlainText
             visible: root.report === null && root.errorText === ""
             width: parent.width
             topPadding: Style.space(10)

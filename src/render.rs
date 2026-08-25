@@ -60,7 +60,7 @@ fn worst_supply_badness(state: &PrinterState) -> Option<u8> {
 
 /// Resolve a bar/tooltip token to its display value, or `None` if absent.
 fn resolve(token: &str, state: &PrinterState) -> Option<String> {
-    use crate::model::{Color, SupplyKind};
+    use crate::model::{Color, InputTray, SupplyClass, SupplyKind};
     let color_pct = |c: Color| {
         state
             .supplies
@@ -543,7 +543,7 @@ pub fn render(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Color, SupplyKind};
+    use crate::model::{Color, InputTray, SupplyClass, SupplyKind};
 
     fn cfg() -> PrinterConfig {
         crate::config::Config::parse("[printer.x]\n")
@@ -600,6 +600,59 @@ mod tests {
         // The format's OWN markup is the user's and survives untouched.
         let (text, _) = render_template("<b>{model}</b>", &st, OnMissing::Hide);
         assert!(text.starts_with("<b>") && text.ends_with("</b>"));
+    }
+
+    #[test]
+    fn no_printer_string_reaches_the_tooltip_as_markup() {
+        // The tooltip is Pango markup, and every one of these fields comes off
+        // the wire: the model, the front-panel text, an alert reason, a supply
+        // name and a tray name. One `<` that survives escaping would let a
+        // printer inject a span — or an `<img>`-style resource load. This is
+        // the tooltip counterpart of the bar test above, in one pass over all
+        // five item kinds.
+        let mut c = cfg();
+        c.tooltip.items = vec![
+            "model".into(),
+            "alerts".into(),
+            "display".into(),
+            "supplies".into(),
+            "paper".into(),
+        ];
+        let poison = "<img src=x>&\"'\"";
+        let mut st = PrinterState {
+            model: Some(format!("M {poison}")),
+            display: Some(format!("D {poison}")),
+            reasons: vec![Reason::Other(format!("R {poison}"))],
+            ..Default::default()
+        };
+        // A supply with no named color falls back to its raw (wire) name, so
+        // the poison actually reaches the label instead of being replaced by
+        // "Black".
+        st.supplies.push(Supply {
+            name: format!("S {poison}"),
+            kind: SupplyKind::Toner,
+            class: SupplyClass::Consumed,
+            color_raw: None,
+            color: None,
+            level: Level::Pct(50),
+            max_capacity: None,
+            unit: None,
+        });
+        st.paper.push(InputTray {
+            name: format!("T {poison}"),
+            level: Level::Pct(80),
+            max_capacity: None,
+            empty: false,
+        });
+        let out = render(&st, &c, &ThemeColors::default(), ColorMode::FULL);
+        let tip = out.tooltip;
+        // The raw tag must appear nowhere; every `<` from the wire is `&lt;`.
+        assert!(!tip.contains("<img"), "unescaped tag in tooltip:\n{tip}");
+        // The five fields are present, in their escaped form.
+        for field in ["M ", "D ", "R ", "S ", "T "] {
+            assert!(tip.contains(field), "missing {field:?} in tooltip");
+        }
+        assert!(tip.contains("&lt;img src=x&gt;"), "model not escaped:\n{tip}");
     }
 
     #[test]
