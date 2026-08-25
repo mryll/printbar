@@ -147,6 +147,21 @@ fn map_level(raw: Option<i64>) -> Level {
     }
 }
 
+/// The attributes this program actually reads. Requesting only these keeps a
+/// cooperative printer's answer small; `MAX_ATTRS` and its siblings are what
+/// hold when a printer answers with more than it was asked for.
+const WANTED: &[&str] = &[
+    "marker-names",
+    "marker-levels",
+    "marker-colors",
+    "marker-types",
+    "printer-state",
+    "printer-state-reasons",
+    "printer-info",
+    "printer-make-and-model",
+    "queued-job-count",
+];
+
 /// Pure semantic mapping from IPP attributes to a partial printer view.
 pub fn parse_attrs(m: &AttrMap) -> PrinterState {
     let names = strs(m, "marker-names");
@@ -268,11 +283,40 @@ fn query(uri_str: &str, timeout: Duration) -> Result<AttrMap, String> {
         }
     }
 
+    /// What is kept out of a printer's answer.
+    ///
+    /// A printer is a device on the network, and this program runs inside the
+    /// long-lived omarchy-shell process — so "the printer would not do that" is
+    /// not a bound. A printer that is hostile, compromised, or merely broken can
+    /// answer with an attribute set that never ends, and everything retained
+    /// here is later serialized into the JSON the shell reads.
+    ///
+    /// These stop the RETENTION. `request_timeout` on the client stops the
+    /// transfer. What neither stops is the crate's own peak while it parses a
+    /// group, which it accumulates before this code sees it — bounded in
+    /// practice by that timeout, not by a byte count.
+    const MAX_ATTRS: usize = 512;
+    const MAX_VALS_PER_ATTR: usize = 256;
+    const MAX_STR: usize = 4096;
+
     fn group_to_map(group: &IppAttributeGroup) -> AttrMap {
         let mut m = AttrMap::new();
-        for (name, attr) in group.attributes() {
-            let vals: Vec<AttrVal> = attr.value().into_iter().filter_map(ipp_val).collect();
-            m.insert(name.to_string(), vals);
+        for (name, attr) in group.attributes().iter().take(MAX_ATTRS) {
+            let vals: Vec<AttrVal> = attr
+                .value()
+                .into_iter()
+                .take(MAX_VALS_PER_ATTR)
+                .filter_map(ipp_val)
+                .map(|v| match v {
+                    // A single attribute value is a name, a model or a state
+                    // reason. Anything past this is not one of those.
+                    AttrVal::Str(s) if s.len() > MAX_STR => {
+                        AttrVal::Str(s.chars().take(MAX_STR).collect())
+                    }
+                    other => other,
+                })
+                .collect();
+            m.insert(name.chars().take(MAX_STR).collect(), vals);
         }
         m
     }
@@ -280,7 +324,12 @@ fn query(uri_str: &str, timeout: Duration) -> Result<AttrMap, String> {
     let uri: Uri = uri_str
         .parse()
         .map_err(|e| format!("bad uri {uri_str}: {e}"))?;
+    // Ask for the attributes this program reads, and no others. A cooperative
+    // printer then sends a small answer instead of its whole catalogue, which
+    // is the cheap half of bounding this response. The caps below are the half
+    // that survives a printer which ignores the request.
     let op = IppOperationBuilder::get_printer_attributes(uri.clone())
+        .attributes(WANTED)
         .build()
         .map_err(|e| format!("build op: {e}"))?;
     let client = IppClient::builder(uri).request_timeout(timeout).build();
