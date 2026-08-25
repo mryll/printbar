@@ -155,10 +155,10 @@ fn map_level(raw: Option<i64>) -> Level {
 /// with an attribute set that never ends, and everything retained here is later
 /// serialized into the JSON the shell reads.
 ///
-/// These stop the RETENTION. `request_timeout` on the client stops the
-/// transfer. What neither stops is the crate's own peak while it parses a group,
-/// which it accumulates before this code sees it — bounded in practice by that
-/// timeout, not by a byte count.
+/// These stop the RETENTION. `MAX_WIRE_BYTES` in `query` stops the transfer
+/// itself: the HTTP body is read through a `take` and buffered BEFORE
+/// `IppParser` sees a byte, so the crate's peak while it parses is bounded by
+/// that buffer, not by trust in the printer.
 const MAX_ATTRS: usize = 512;
 const MAX_VALS_PER_ATTR: usize = 256;
 const MAX_STR: usize = 4096;
@@ -324,10 +324,45 @@ impl Source for IppSource {
     }
 }
 
+/// What the HTTP body of one IPP response may cost, in bytes.
+///
+/// The crate's own client hands the whole body straight to `IppParser`, so a
+/// printer that streams for ever grows the parser's buffers until the request
+/// timeout fires — elapsed time was the only bound, accumulated bytes had
+/// none. Reading the wire through a `take` and buffering at most this many
+/// bytes puts the limit BEFORE the parser: the peak this response can cost is
+/// `MAX_WIRE_BYTES`, no matter what the printer sends. A real answer to the
+/// nine attributes in `WANTED` is a few KiB.
+const MAX_WIRE_BYTES: u64 = 2 * 1024 * 1024;
+
+/// `ipp://host[:port]/path` to the `http://` URL the transfer actually uses.
+///
+/// The crate has this conversion too, but private to its client. printbar only
+/// ever builds `ipp://` URIs (see `collect`), so anything else is refused by
+/// name instead of guessed at.
+fn ipp_http_url(uri: &ipp::prelude::Uri) -> Result<String, String> {
+    if uri.scheme_str() != Some("ipp") {
+        return Err(format!("unsupported scheme in {uri}: only ipp:// is built in"));
+    }
+    let authority = uri.authority().ok_or_else(|| format!("no host in {uri}"))?;
+    let authority = if authority.port_u16().is_some() {
+        authority.to_string()
+    } else {
+        format!("{authority}:631")
+    };
+    let path_and_query = uri.path_and_query().map(|p| p.as_str()).unwrap_or_default();
+    Ok(format!("http://{authority}{path_and_query}"))
+}
+
 fn query(uri_str: &str, timeout: Duration) -> Result<AttrMap, String> {
+    use std::io::Read;
+
     use ipp::attribute::IppAttributeGroup;
     use ipp::model::DelimiterTag;
+    use ipp::parser::IppParser;
     use ipp::prelude::*;
+    use ipp::reader::IppReader;
+    use ipp::request::IppRequestResponse;
     use ipp::value::IppValue;
 
     fn ipp_val(v: &IppValue) -> Option<AttrVal> {
@@ -365,8 +400,37 @@ fn query(uri_str: &str, timeout: Duration) -> Result<AttrMap, String> {
         .attributes(WANTED)
         .build()
         .map_err(|e| format!("build op: {e}"))?;
-    let client = IppClient::builder(uri).request_timeout(timeout).build();
-    let resp = client.send(op).map_err(|e| format!("ipp send: {e}"))?;
+    // The send is done by hand instead of through `IppClient` for one reason:
+    // the crate's client pipes the HTTP body straight into `IppParser`, with
+    // nothing between the printer and the parser's buffers. Same transport
+    // (ureq, plain http, connect + global timeouts), plus a byte limit on the
+    // wire. Reading one byte past the limit is what tells a body that fits
+    // from one the cap truncated.
+    let url = ipp_http_url(&uri)?;
+    let request: IppRequestResponse = op.into();
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_connect(Some(Duration::from_secs(10)))
+        .timeout_global(Some(timeout))
+        .build()
+        .into();
+    let response = agent
+        .post(&url)
+        .header("content-type", "application/ipp")
+        .send(ureq::SendBody::from_reader(&mut request.into_read()))
+        .map_err(|e| format!("ipp send: {e}"))?;
+    let mut body: Vec<u8> = Vec::new();
+    response
+        .into_body()
+        .into_reader()
+        .take(MAX_WIRE_BYTES + 1)
+        .read_to_end(&mut body)
+        .map_err(|e| format!("ipp read: {e}"))?;
+    if body.len() as u64 > MAX_WIRE_BYTES {
+        return Err(format!("ipp response is larger than {MAX_WIRE_BYTES} bytes"));
+    }
+    let resp = IppParser::new(IppReader::new(std::io::Cursor::new(body)))
+        .parse()
+        .map_err(|e| format!("ipp parse: {e}"))?;
     if !resp.header().status_code().is_success() {
         return Err(format!("ipp status {:?}", resp.header().status_code()));
     }
@@ -601,5 +665,146 @@ mod tests {
         assert_eq!(st.status, Some(Status::Stopped));
         assert_eq!(st.reasons, vec![Reason::Jam, Reason::SupplyLow]);
         assert_eq!(st.supplies[0].level, Level::Unknown);
+    }
+
+    // --- the wire limit -------------------------------------------------
+
+    use std::io::{Read as _, Write as _};
+    use std::net::TcpListener;
+    use std::time::Duration;
+
+    /// Serve one HTTP connection with `response` and return the ipp:// uri.
+    /// The request is drained until the chunked terminator so the client is
+    /// never mid-write when the response lands.
+    fn serve_once(response: Vec<u8>) -> String {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            if let Ok((mut sock, _)) = l.accept() {
+                let mut seen: Vec<u8> = Vec::new();
+                let mut buf = [0u8; 4096];
+                loop {
+                    match sock.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => {
+                            seen.extend_from_slice(&buf[..n]);
+                            if seen.windows(5).any(|w| w == b"0\r\n\r\n") {
+                                break;
+                            }
+                        }
+                    }
+                }
+                let _ = sock.write_all(&response);
+            }
+        });
+        format!("ipp://127.0.0.1:{port}/ipp/print")
+    }
+
+    fn http_response(body: &[u8]) -> Vec<u8> {
+        let mut r = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/ipp\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        r.extend_from_slice(body);
+        r
+    }
+
+    /// query() on a thread with a deadline, so a regression that hangs fails
+    /// the test in seconds instead of hanging the suite.
+    fn query_with_deadline(uri: String) -> Result<AttrMap, String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(query(&uri, Duration::from_secs(30)));
+        });
+        rx.recv_timeout(Duration::from_secs(20))
+            .expect("query did not return before the deadline")
+    }
+
+    #[test]
+    fn a_printer_answer_that_fits_the_wire_limit_parses_as_before() {
+        use ipp::attribute::IppAttribute;
+        use ipp::model::{DelimiterTag, IppVersion, StatusCode};
+        use ipp::request::IppRequestResponse;
+        use ipp::value::IppValue;
+
+        let mut resp =
+            IppRequestResponse::new_response(IppVersion::v1_1(), StatusCode::SuccessfulOk, 1)
+                .unwrap();
+        resp.attributes_mut().add(
+            DelimiterTag::PrinterAttributes,
+            IppAttribute::new("printer-state".parse().unwrap(), IppValue::Enum(3)),
+        );
+        let mut body = Vec::new();
+        resp.into_read().read_to_end(&mut body).unwrap();
+
+        let uri = serve_once(http_response(&body));
+        let map = query_with_deadline(uri).expect("a small real answer must parse");
+        assert_eq!(first_int(&map, "printer-state"), Some(3));
+    }
+
+    #[test]
+    fn a_response_larger_than_the_wire_limit_is_refused_by_size_not_parsed() {
+        // The numbers are written out on purpose: a test that reads
+        // MAX_WIRE_BYTES moves with it and can never fail.
+        let uri = serve_once(http_response(&vec![0u8; 2 * 1024 * 1024 + 100]));
+        let e = query_with_deadline(uri).unwrap_err();
+        assert!(
+            e.contains("larger than 2097152 bytes"),
+            "expected the size refusal, got: {e}"
+        );
+    }
+
+    #[test]
+    fn a_printer_that_streams_chunks_for_ever_is_cut_at_the_wire_limit() {
+        // No content-length and no end: the one shape only a byte limit stops.
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            if let Ok((mut sock, _)) = l.accept() {
+                let mut buf = [0u8; 4096];
+                let _ = sock.read(&mut buf);
+                if sock
+                    .write_all(b"HTTP/1.1 200 OK\r\ncontent-type: application/ipp\r\ntransfer-encoding: chunked\r\n\r\n")
+                    .is_err()
+                {
+                    return;
+                }
+                let chunk = format!("{:x}\r\n{}\r\n", 8192, "x".repeat(8192));
+                loop {
+                    if sock.write_all(chunk.as_bytes()).is_err() {
+                        return; // the client hung up: the cap did its work
+                    }
+                }
+            }
+        });
+        let uri = format!("ipp://127.0.0.1:{port}/ipp/print");
+        let e = query_with_deadline(uri).unwrap_err();
+        assert!(
+            e.contains("larger than 2097152 bytes"),
+            "expected the size refusal, got: {e}"
+        );
+    }
+
+    #[test]
+    fn an_ipp_uri_with_no_port_gets_the_ipp_default_631() {
+        let uri: ipp::prelude::Uri = "ipp://printer.lan/ipp/print".parse().unwrap();
+        assert_eq!(
+            ipp_http_url(&uri).unwrap(),
+            "http://printer.lan:631/ipp/print"
+        );
+    }
+
+    #[test]
+    fn an_ipp_uri_keeps_the_port_it_names() {
+        let uri: ipp::prelude::Uri = "ipp://10.0.0.5:8631/x".parse().unwrap();
+        assert_eq!(ipp_http_url(&uri).unwrap(), "http://10.0.0.5:8631/x");
+    }
+
+    #[test]
+    fn a_scheme_that_is_not_ipp_is_refused_by_name() {
+        let uri: ipp::prelude::Uri = "https://printer.lan/ipp".parse().unwrap();
+        let e = ipp_http_url(&uri).unwrap_err();
+        assert!(e.contains("only ipp:// is built in"), "got: {e}");
     }
 }
