@@ -51,6 +51,55 @@ const WALK_BASES: &[(&str, &[u64])] = &[
 ];
 
 const ROW_CAP: usize = 64;
+
+/// What retention of one SNMP poll may cost.
+///
+/// Every string in the map came off the network: an `OctetString` can be as
+/// large as the agent's message size, and the walk accepts up to
+/// `WALK_VARBIND_CAP` varbinds for each of six subtrees — per-item caps
+/// multiply, so without a total budget a hostile printer could park hundreds
+/// of megabytes here during one poll. `retain` applies all three limits at the
+/// single point where network data enters the map. The numbers mirror the IPP
+/// side: 4096 characters for a value, 256 for an OID, `256 KiB` for the whole
+/// poll.
+const MAX_VAL_CHARS: usize = 4096;
+const MAX_OID_CHARS: usize = 256;
+const MAX_TOTAL_CHARS: usize = 256 * 1024;
+
+/// Keep one varbind, under the caps. Returns false when the budget is spent —
+/// the walk must stop retaining, not merely skip.
+fn retain(map: &mut OidMap, budget: &mut usize, oid: String, v: SnmpVal) -> bool {
+    if *budget == 0 {
+        return false;
+    }
+    if oid.chars().count() > MAX_OID_CHARS {
+        // A legitimate printer OID is a few dozen characters. Longer is not a
+        // row this program reads, and its key would eat the budget.
+        return true;
+    }
+    // The key spends first, so key plus value can never overshoot the
+    // budget — the sum of everything retained stays under MAX_TOTAL_CHARS.
+    let cost_key = oid.chars().count();
+    if *budget <= cost_key {
+        *budget = 0;
+        return false;
+    }
+    let room = *budget - cost_key;
+    let v = match v {
+        SnmpVal::Str(t) => {
+            let cut: String = t.chars().take(MAX_VAL_CHARS.min(room)).collect();
+            SnmpVal::Str(cut)
+        }
+        other => other,
+    };
+    let cost_val = match &v {
+        SnmpVal::Str(t) => t.chars().count(),
+        _ => 0,
+    };
+    *budget -= cost_key + cost_val;
+    map.insert(oid, v);
+    true
+}
 /// Max varbinds to fetch per subtree walk. Must be comfortably above
 /// ROW_CAP * (columns-before-the-last-used-one) so a multi-column table never truncates
 /// before reaching its level column.
@@ -351,8 +400,9 @@ fn walk_all(host: &str, community: &str, timeout: std::time::Duration) -> Result
     }
 
     let mut map = OidMap::new();
+    let mut budget = MAX_TOTAL_CHARS;
     let mut transport_ok = false;
-    for (prefix, base) in WALK_BASES {
+    'subtrees: for (prefix, base) in WALK_BASES {
         let want = format!("{prefix}.");
         let mut cur: Vec<u64> = base.to_vec();
         for _ in 0..WALK_VARBIND_CAP {
@@ -392,7 +442,9 @@ fn walk_all(host: &str, community: &str, timeout: std::time::Duration) -> Result
                 break; // no numeric progress ⇒ avoid looping
             }
             if let Some(v) = sval {
-                map.insert(oid_s, v);
+                if !retain(&mut map, &mut budget, oid_s, v) {
+                    break 'subtrees; // the poll's budget is spent
+                }
             }
             cur = next;
         }
@@ -519,5 +571,70 @@ mod tests {
         assert_eq!(st.paper[0].name, "Tray 2");
         assert_eq!(st.paper[0].level, Level::Pct(80));
         assert_eq!(st.reasons, vec![Reason::Jam]); // only the critical one
+    }
+
+    // --- the poll budget ------------------------------------------------
+
+    #[test]
+    fn the_poll_limits_hold_their_documented_values() {
+        // The other budget tests hand `retain` a budget of their own, so they
+        // prove the mechanism and this pin proves the wiring: changing a
+        // safety limit must cost an edit here, on purpose.
+        assert_eq!(MAX_TOTAL_CHARS, 262_144);
+        assert_eq!(MAX_VAL_CHARS, 4096);
+        assert_eq!(MAX_OID_CHARS, 256);
+    }
+
+    #[test]
+    fn a_normal_varbind_is_kept_whole() {
+        let mut m = OidMap::new();
+        let mut budget = 256 * 1024;
+        assert!(retain(&mut m, &mut budget, "1.3.6.1.2.1.43.11.1.1.9.1.1".into(), SnmpVal::Str("Black Cartridge".into())));
+        assert_eq!(m.len(), 1);
+        assert!(matches!(m.values().next().unwrap(), SnmpVal::Str(t) if t == "Black Cartridge"));
+    }
+
+    #[test]
+    fn a_value_longer_than_4096_characters_is_cut_at_4096() {
+        // The number is written out on purpose: a test that reads the constant
+        // moves with it and can never fail.
+        let mut m = OidMap::new();
+        let mut budget = 256 * 1024;
+        retain(&mut m, &mut budget, "1.3.6.1.4.1".into(), SnmpVal::Str("x".repeat(100_000)));
+        let SnmpVal::Str(t) = m.values().next().unwrap() else { panic!() };
+        assert_eq!(t.chars().count(), 4096);
+    }
+
+    #[test]
+    fn an_oid_longer_than_256_characters_is_not_kept() {
+        let mut m = OidMap::new();
+        let mut budget = 256 * 1024;
+        let long_oid = "1.".repeat(200) + "1";
+        assert!(retain(&mut m, &mut budget, long_oid, SnmpVal::Int(1)));
+        assert!(m.is_empty());
+        assert_eq!(budget, 256 * 1024, "a dropped row must not spend budget");
+    }
+
+    #[test]
+    fn a_poll_cannot_retain_more_than_262144_characters() {
+        // A hostile printer answers every getnext with a 4 KiB string. Without
+        // the total budget this map would grow to WALK_VARBIND_CAP × subtrees
+        // × 4 KiB — the exact shape the review named.
+        let mut m = OidMap::new();
+        let mut budget = 256 * 1024;
+        let mut stopped = false;
+        for i in 0..100_000 {
+            if !retain(&mut m, &mut budget, format!("1.3.6.1.9.{i}"), SnmpVal::Str("y".repeat(4096))) {
+                stopped = true;
+                break;
+            }
+        }
+        assert!(stopped, "the walk was never told to stop");
+        let total: usize = m
+            .iter()
+            .map(|(k, v)| k.chars().count() + match v { SnmpVal::Str(t) => t.chars().count(), _ => 0 })
+            .sum();
+        assert!(total <= 262_144, "retained {total} characters");
+        assert!(m.len() < 100, "kept {} rows — the budget did not bite", m.len());
     }
 }
