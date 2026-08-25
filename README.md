@@ -77,6 +77,12 @@ make build
 make install PREFIX=~/.local   # installs printbar, printbar-watch and the systemd unit
 ```
 
+To install for all users, run `sudo make install`. To remove printbar:
+
+```bash
+make uninstall PREFIX=~/.local
+```
+
 ## Quick start
 
 Create `~/.config/printbar/config.toml` with one section for each printer:
