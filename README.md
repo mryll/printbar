@@ -293,6 +293,22 @@ The bar shows a printer glyph. The glyph is muted when the printer is idle, and 
 
 A left click opens a themed panel with the front-panel words of the printer. The panel also shows ink swatches for each supply, animated level meters, trays and job statistics. A right click opens the web panel (EWS) of the printer. A middle click refreshes the data. The footer of the panel ends with a refresh control (󰑐), next to the time of the last update. The control stays disabled while a fetch runs. The Waybar mode does not change — the plugin is an added frontend, not a replacement.
 
+### Install the plugin
+
+From the marketplace, or from this repository directly:
+
+```bash
+omarchy plugin add https://github.com/mryll/printbar.git --enable
+```
+
+That clones the repository into `~/.config/omarchy/plugins/mryll.printbar` and
+validates the manifest before it is enabled. To remove it later:
+`omarchy plugin remove mryll.printbar`.
+
+The plugin runs the `printbar` binary from your PATH, so install that too — from the AUR (`yay -S printbar-bin`) or with `make install PREFIX=~/.local`.
+
+For development, link the working copy instead of cloning a second one:
+
 ```bash
 make install PREFIX=~/.local   # the plugin runs the printbar binary from PATH
 make install-omarchy           # symlinks the repo to ~/.config/omarchy/plugins/mryll.printbar
