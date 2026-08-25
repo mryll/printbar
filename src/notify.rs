@@ -78,10 +78,17 @@ fn load_prev(path: &std::path::Path) -> Vec<String> {
 
 fn save_cur(path: &std::path::Path, cur: &[String]) {
     // Atomic: write to a temp sibling then rename.
+    // The temp sibling is a predictable path too, so it gets the same guard as
+    // any other write: a FIFO planted there would hang this on `open`, and this
+    // runs on the Waybar path, inside the shell.
     let tmp = path.with_extension("json.tmp");
     if let Ok(s) = serde_json::to_string(cur) {
-        if std::fs::write(&tmp, s).is_ok() {
-            let _ = std::fs::rename(&tmp, path);
+        if let Ok(mut f) = crate::safe_read::open_regular_for_write(&tmp) {
+            use std::io::Write;
+            if f.write_all(s.as_bytes()).is_ok() && f.sync_all().is_ok() {
+                drop(f);
+                let _ = std::fs::rename(&tmp, path);
+            }
         }
     }
 }

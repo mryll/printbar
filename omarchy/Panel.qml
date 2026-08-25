@@ -323,7 +323,10 @@ Panel {
 
   function finalizeRun() {
     var text = capturedText.trim()
-    if (text === "")
+    // Only when nothing has explained it already. The tripwire above also
+    // leaves capturedText empty, and there "not installed" is false: the
+    // binary answered, it answered too much.
+    if (text === "" && root.errorText === "")
       // The install hint lives HERE and not in the core, which is where every
       // other message of this family lives. The one message the core cannot
       // emit is the one about its own absence.
@@ -402,8 +405,23 @@ Panel {
     }
     stdout: StdioCollector {
       waitForEnd: true
+      // A tripwire, not a limit, and it counts UTF-16 units rather than bytes —
+      // QML's String.length has no byte view. A megabyte of units is up to
+      // three megabytes of UTF-8, which is still far outside anything the CLI
+      // can produce now that every file it reads and every printer answer it
+      // keeps is capped. The real bound is there; this only refuses to RETAIN
+      // an answer that could not have come from a healthy run. StdioCollector
+      // has already buffered the whole stream by the time this runs, so it
+      // cannot cap the peak either.
+      readonly property int maxChars: 1024 * 1024
       onStreamFinished: {
-        root.capturedText = text
+        if (text.length > maxChars) {
+          root.capturedText = ""
+          root.setError("printbar returned more than " + (maxChars / 1024)
+                        + "K characters — refusing it")
+        } else {
+          root.capturedText = text
+        }
         root.collectorDone = true
         root.maybeFinalize()
       }

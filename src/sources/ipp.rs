@@ -162,6 +162,13 @@ fn map_level(raw: Option<i64>) -> Level {
 const MAX_ATTRS: usize = 512;
 const MAX_VALS_PER_ATTR: usize = 256;
 const MAX_STR: usize = 4096;
+/// The one that actually bounds the answer.
+///
+/// The three caps above are per-item, and per-item caps multiply: 512 × 256 ×
+/// 4096 is 512 MiB, which is not a bound at all. This is the budget for the
+/// whole group. Retention stops when it runs out, so a printer cannot spend a
+/// little at a time and add up to something large.
+const MAX_TOTAL_CHARS: usize = 256 * 1024;
 
 /// Apply the retention caps to one group's worth of attributes.
 ///
@@ -173,20 +180,31 @@ where
     I: IntoIterator<Item = (String, Vec<AttrVal>)>,
 {
     let mut m = AttrMap::new();
+    let mut budget = MAX_TOTAL_CHARS;
     for (name, vals) in pairs.into_iter().take(MAX_ATTRS) {
-        let vals: Vec<AttrVal> = vals
-            .into_iter()
-            .take(MAX_VALS_PER_ATTR)
-            .map(|v| match v {
+        if budget == 0 {
+            break;
+        }
+        let name: String = name.chars().take(MAX_STR.min(budget)).collect();
+        budget -= name.chars().count();
+        let mut kept: Vec<AttrVal> = Vec::new();
+        for v in vals.into_iter().take(MAX_VALS_PER_ATTR) {
+            if budget == 0 {
+                break;
+            }
+            kept.push(match v {
                 // A single value is a name, a model or a state reason. Anything
                 // past this is not one of those.
-                AttrVal::Str(s) if s.chars().count() > MAX_STR => {
-                    AttrVal::Str(s.chars().take(MAX_STR).collect())
+                AttrVal::Str(s) => {
+                    let cut: String = s.chars().take(MAX_STR.min(budget)).collect();
+                    budget -= cut.chars().count();
+                    AttrVal::Str(cut)
                 }
+                // A number costs nothing worth counting.
                 other => other,
-            })
-            .collect();
-        m.insert(name.chars().take(MAX_STR).collect(), vals);
+            });
+        }
+        m.insert(name, kept);
     }
     m
 }
@@ -446,6 +464,53 @@ mod tests {
             }
             other => panic!("expected a string, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn the_whole_group_cannot_cost_more_than_the_budget() {
+        // The per-item caps multiply: 512 attributes of 256 values of 4096
+        // characters is 512 MiB. This is the number that holds.
+        let huge: Vec<(String, Vec<AttrVal>)> = (0..500)
+            .map(|k| {
+                (
+                    format!("attr-{k}"),
+                    (0..200).map(|_| s(&"x".repeat(4000))).collect(),
+                )
+            })
+            .collect();
+        let out = cap_attrs(huge);
+        let total: usize = out
+            .iter()
+            .map(|(k, vs)| {
+                k.chars().count()
+                    + vs.iter()
+                        .map(|v| match v {
+                            AttrVal::Str(x) => x.chars().count(),
+                            _ => 0,
+                        })
+                        .sum::<usize>()
+            })
+            .sum();
+        assert!(total <= 262144, "kept {total} characters");
+    }
+
+    #[test]
+    fn a_printer_cannot_spend_the_budget_a_little_at_a_time() {
+        // Every value is under every per-item cap. Only the running budget
+        // stops this one.
+        let many: Vec<(String, Vec<AttrVal>)> = (0..500)
+            .map(|k| (format!("a{k}"), vec![s(&"y".repeat(1000))]))
+            .collect();
+        let out = cap_attrs(many);
+        let total: usize = out
+            .values()
+            .flatten()
+            .map(|v| match v {
+                AttrVal::Str(x) => x.chars().count(),
+                _ => 0,
+            })
+            .sum();
+        assert!(total <= 262144, "kept {total} characters");
     }
 
     #[test]
