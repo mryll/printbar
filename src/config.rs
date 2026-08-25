@@ -183,6 +183,32 @@ impl Default for Thresholds {
     }
 }
 
+/// Where the shipped `config.example.toml` is, as a string the user can paste.
+///
+/// The package puts it under the install prefix, so the prefix is whatever
+/// this binary was installed with — /usr for the package, ~/.local for
+/// `make install PREFIX=~/.local`, and nowhere at all for a release binary
+/// dropped on the PATH by hand. Each candidate is checked; the repository URL
+/// is the answer when none of them is there.
+fn example_path() -> String {
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        // <prefix>/bin/printbar -> <prefix>/share/printbar/config.example.toml
+        if let Some(prefix) = exe.parent().and_then(|d| d.parent()) {
+            candidates.push(prefix.join("share/printbar/config.example.toml"));
+        }
+    }
+    candidates.push(std::path::PathBuf::from(
+        "/usr/share/printbar/config.example.toml",
+    ));
+    for c in candidates {
+        if c.is_file() {
+            return c.display().to_string();
+        }
+    }
+    "https://github.com/mryll/printbar/raw/master/config.example.toml".into()
+}
+
 impl Config {
     pub fn parse(s: &str) -> Result<Self, toml::de::Error> {
         toml::from_str(s)
@@ -199,10 +225,17 @@ impl Config {
                     .parent()
                     .map(|d| d.display().to_string())
                     .unwrap_or_default();
+                // The example is named where it ACTUALLY is. A hardcoded
+                // /usr/share is right for the package and wrong for
+                // `make install PREFIX=~/.local` or a bare release binary,
+                // and a copy command that names a missing file is worse
+                // than no copy command.
+                let example = example_path();
                 format!(
-                    "no config yet: {}\n\nCopy the example and name your printer in it:\n  mkdir -p {}\n  cp /usr/share/printbar/config.example.toml {}",
+                    "no config yet: {}\n\nCopy the example and name your printer in it:\n  mkdir -p {}\n  cp {} {}",
                     path.display(),
                     dir,
+                    example,
                     path.display(),
                 )
             } else {
