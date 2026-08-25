@@ -70,7 +70,7 @@ pub fn cache_path(name: &str) -> PathBuf {
 }
 
 fn load_prev(path: &std::path::Path) -> Vec<String> {
-    std::fs::read_to_string(path)
+    crate::safe_read::read_bounded(path, crate::safe_read::STATE_LIMIT)
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default()

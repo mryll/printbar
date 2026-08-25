@@ -1,3 +1,4 @@
+mod safe_read;
 mod actions;
 mod color;
 mod config;

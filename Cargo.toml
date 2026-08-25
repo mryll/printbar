@@ -9,6 +9,7 @@ keywords = ["waybar", "printer", "ipp", "snmp", "wayland"]
 categories = ["command-line-utilities"]
 
 [dependencies]
+libc = "0.2"
 ipp = { version = "6", default-features = false, features = ["client"] }
 snmp2 = { version = "0.5", default-features = false }
 serde = { version = "1", features = ["derive"] }

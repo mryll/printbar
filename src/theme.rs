@@ -8,7 +8,6 @@
 
 use std::collections::HashMap;
 use std::ffi::OsString;
-use std::fs;
 use std::path::PathBuf;
 
 use serde::Deserialize;
@@ -124,12 +123,12 @@ impl ThemeColors {
 
     fn load_from(omarchy: Option<PathBuf>, pywal: Option<PathBuf>) -> Self {
         if let Some(path) = omarchy {
-            if let Ok(content) = fs::read_to_string(&path) {
+            if let Ok(content) = crate::safe_read::read_bounded(&path, crate::safe_read::CONFIG_LIMIT) {
                 return Self::from_toml(&content);
             }
         }
         if let Some(path) = pywal {
-            if let Ok(content) = fs::read_to_string(&path) {
+            if let Ok(content) = crate::safe_read::read_bounded(&path, crate::safe_read::CONFIG_LIMIT) {
                 return Self::from_pywal_json(&content);
             }
         }
@@ -299,6 +298,7 @@ fn blend_hex(c1: &str, c2: &str, ratio: f32) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use super::*;
 
     /// Tokyo Night as Omarchy 4.x ships it: named keys, no `colorN` at all.

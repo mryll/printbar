@@ -480,6 +480,7 @@ dependencies = [
  "chrono",
  "dirs",
  "ipp",
+ "libc",
  "predicates",
  "serde",
  "serde_json",
