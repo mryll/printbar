@@ -323,17 +323,19 @@ Panel {
 
   function finalizeRun() {
     var text = capturedText.trim()
-    // Only when nothing has explained it already. The tripwire above also
-    // leaves capturedText empty, and there "not installed" is false: the
-    // binary answered, it answered too much.
-    if (text === "" && root.errorText === "")
-      // The install hint lives HERE and not in the core, which is where every
-      // other message of this family lives. The one message the core cannot
-      // emit is the one about its own absence.
-      setError("printbar produced no output — not installed or not on PATH?\n\n"
-               + "Install it with:  yay -S printbar-bin\n"
-               + "Then open this panel again.")
-    else
+    if (text === "") {
+      // Empty text must never reach handle(): it would report "unparseable
+      // output" over whatever already explained the emptiness. The tripwire
+      // above leaves capturedText empty too, and there "not installed" is
+      // false — the binary answered, it answered too much.
+      if (root.errorText === "")
+        // The install hint lives HERE and not in the core, which is where every
+        // other message of this family lives. The one message the core cannot
+        // emit is the one about its own absence.
+        setError("printbar produced no output — not installed or not on PATH?\n\n"
+                 + "Install it with:  yay -S printbar-bin\n"
+                 + "Then open this panel again.")
+    } else
       handle(text)
     if (pendingCmd) {
       var c = pendingCmd

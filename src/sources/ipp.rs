@@ -470,11 +470,14 @@ mod tests {
     fn the_whole_group_cannot_cost_more_than_the_budget() {
         // The per-item caps multiply: 512 attributes of 256 values of 4096
         // characters is 512 MiB. This is the number that holds.
-        let huge: Vec<(String, Vec<AttrVal>)> = (0..500)
+        // Enough to blow the budget many times over without building half a
+        // gigabyte to prove it: this runs in CI, and a test that needs 400 MB
+        // to make its point is a test that gets deleted.
+        let huge: Vec<(String, Vec<AttrVal>)> = (0..200)
             .map(|k| {
                 (
                     format!("attr-{k}"),
-                    (0..200).map(|_| s(&"x".repeat(4000))).collect(),
+                    (0..20).map(|_| s(&"x".repeat(4000))).collect(),
                 )
             })
             .collect();
