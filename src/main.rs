@@ -106,7 +106,12 @@ fn run(args: &[String], json_mode: bool) -> Result<(), String> {
     let colors = color::ColorMode::resolve(args, no_color_env().as_deref())?;
 
     let name = printer_arg(args)
-        .ok_or("usage: printbar <printer-name> [--json] [--no-color[=all|bar|tooltip]]\nRun printbar --help for the full reference.")?;
+        .ok_or(
+            "no printer named yet.\n\nOn the Omarchy bar, set \"printerName\" in the widget \
+             settings.\nOn Waybar, pass the name: printbar <printer-name>\n\nThe name is a \
+             [printer.<name>] section in ~/.config/printbar/config.toml.\nRun printbar --help \
+             for the full reference.",
+        )?;
     let cfg = Config::load(&config_path())?;
     let pc = cfg
         .for_printer(name)

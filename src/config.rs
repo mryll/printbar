@@ -189,8 +189,26 @@ impl Config {
     }
 
     pub fn load(path: &std::path::Path) -> Result<Self, String> {
-        let s = std::fs::read_to_string(path)
-            .map_err(|e| format!("config read {}: {e}", path.display()))?;
+        // A missing file is the FIRST RUN, not a failure to report as one. It is
+        // what every new user meets, and "No such file or directory" tells them
+        // nothing they can act on — so this path says what to write and where the
+        // shipped example is. Every other io error keeps its own words.
+        let s = std::fs::read_to_string(path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                let dir = path
+                    .parent()
+                    .map(|d| d.display().to_string())
+                    .unwrap_or_default();
+                format!(
+                    "no config yet: {}\n\nCopy the example and name your printer in it:\n  mkdir -p {}\n  cp /usr/share/printbar/config.example.toml {}",
+                    path.display(),
+                    dir,
+                    path.display(),
+                )
+            } else {
+                format!("config read {}: {e}", path.display())
+            }
+        })?;
         Self::parse(&s).map_err(|e| format!("config parse: {e}"))
     }
 

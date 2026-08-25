@@ -9,6 +9,7 @@ build:
 
 install: build
 	install -Dm755 target/release/printbar "$(BIN)/printbar"
+	install -Dm644 config.example.toml "$(PREFIX)/share/printbar/config.example.toml"
 	install -Dm755 printbar-watch "$(BIN)/printbar-watch"
 	install -d "$(UNITDIR)"
 	sed 's|@BIN@|$(BIN)|' printbar-watch.service > "$(UNITDIR)/printbar-watch.service"
