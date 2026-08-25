@@ -11,6 +11,7 @@ Generic Waybar printer widget. One-shot Rust binary: collect (IPP + SNMP) → me
 - Build: `make build`; install: `make install PREFIX=~/.local`. Lint: `cargo clippy`; format `cargo fmt`.
 - **A tooltip meter is PARKED, not rendered in place.** `build_tooltip` pushes a `METER<i>` sentinel row plus a `MeterRow` into `meters`, and the width pass resolves them. The bar has to reach the tooltip's right edge, and that edge is the widest TEXT row — which does not exist yet while the supplies are being built. The width pass MUST skip `SEP` and `METER` rows, or the measurement is circular. Every meter in one tooltip gets the SAME bar length: they stack, so a reader compares them against each other.
 - **`screenshots/demo/demo-data` RE-IMPLEMENTS the tooltip renderer in bash.** The README screenshots are made from it, so a change to `build_tooltip`'s geometry has to be mirrored there in the same commit, or the published screenshots stop showing the product.
+- **Quickshell emits NEITHER `started` NOR `exited` when the command does not exist** — `running` just drops back to false. That is the only signal a failed start gives. Anything that waits on `onExited` to leave a loading state hangs for ever when the CLI is not installed, which is the first run of everyone who installs the plugin from the marketplace: the plugin is a git clone, the CLI is a package, and nothing installs the second for you. The `onRunningChanged` guard in the panel's `Process` is what makes the not-installed message reachable — verified against a running shell, not assumed.
 
 ## Release
 
