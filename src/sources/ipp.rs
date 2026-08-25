@@ -147,6 +147,50 @@ fn map_level(raw: Option<i64>) -> Level {
     }
 }
 
+/// What is kept out of a printer's answer.
+///
+/// A printer is a device on the network, and this program runs inside the
+/// long-lived omarchy-shell process — so "the printer would not do that" is not
+/// a bound. A printer that is hostile, compromised, or merely broken can answer
+/// with an attribute set that never ends, and everything retained here is later
+/// serialized into the JSON the shell reads.
+///
+/// These stop the RETENTION. `request_timeout` on the client stops the
+/// transfer. What neither stops is the crate's own peak while it parses a group,
+/// which it accumulates before this code sees it — bounded in practice by that
+/// timeout, not by a byte count.
+const MAX_ATTRS: usize = 512;
+const MAX_VALS_PER_ATTR: usize = 256;
+const MAX_STR: usize = 4096;
+
+/// Apply the retention caps to one group's worth of attributes.
+///
+/// Split out of the IPP call so a test can reach it: building a real
+/// `IppAttributeGroup` needs the crate's types, and what needs proving here is
+/// the arithmetic, not the crate's parser.
+fn cap_attrs<I>(pairs: I) -> AttrMap
+where
+    I: IntoIterator<Item = (String, Vec<AttrVal>)>,
+{
+    let mut m = AttrMap::new();
+    for (name, vals) in pairs.into_iter().take(MAX_ATTRS) {
+        let vals: Vec<AttrVal> = vals
+            .into_iter()
+            .take(MAX_VALS_PER_ATTR)
+            .map(|v| match v {
+                // A single value is a name, a model or a state reason. Anything
+                // past this is not one of those.
+                AttrVal::Str(s) if s.chars().count() > MAX_STR => {
+                    AttrVal::Str(s.chars().take(MAX_STR).collect())
+                }
+                other => other,
+            })
+            .collect();
+        m.insert(name.chars().take(MAX_STR).collect(), vals);
+    }
+    m
+}
+
 /// The attributes this program actually reads. Requesting only these keeps a
 /// cooperative printer's answer small; `MAX_ATTRS` and its siblings are what
 /// hold when a printer answers with more than it was asked for.
@@ -283,42 +327,13 @@ fn query(uri_str: &str, timeout: Duration) -> Result<AttrMap, String> {
         }
     }
 
-    /// What is kept out of a printer's answer.
-    ///
-    /// A printer is a device on the network, and this program runs inside the
-    /// long-lived omarchy-shell process — so "the printer would not do that" is
-    /// not a bound. A printer that is hostile, compromised, or merely broken can
-    /// answer with an attribute set that never ends, and everything retained
-    /// here is later serialized into the JSON the shell reads.
-    ///
-    /// These stop the RETENTION. `request_timeout` on the client stops the
-    /// transfer. What neither stops is the crate's own peak while it parses a
-    /// group, which it accumulates before this code sees it — bounded in
-    /// practice by that timeout, not by a byte count.
-    const MAX_ATTRS: usize = 512;
-    const MAX_VALS_PER_ATTR: usize = 256;
-    const MAX_STR: usize = 4096;
-
     fn group_to_map(group: &IppAttributeGroup) -> AttrMap {
-        let mut m = AttrMap::new();
-        for (name, attr) in group.attributes().iter().take(MAX_ATTRS) {
-            let vals: Vec<AttrVal> = attr
-                .value()
-                .into_iter()
-                .take(MAX_VALS_PER_ATTR)
-                .filter_map(ipp_val)
-                .map(|v| match v {
-                    // A single attribute value is a name, a model or a state
-                    // reason. Anything past this is not one of those.
-                    AttrVal::Str(s) if s.len() > MAX_STR => {
-                        AttrVal::Str(s.chars().take(MAX_STR).collect())
-                    }
-                    other => other,
-                })
-                .collect();
-            m.insert(name.chars().take(MAX_STR).collect(), vals);
-        }
-        m
+        cap_attrs(group.attributes().iter().map(|(name, attr)| {
+            (
+                name.to_string(),
+                attr.value().into_iter().filter_map(ipp_val).collect::<Vec<_>>(),
+            )
+        }))
     }
 
     let uri: Uri = uri_str
@@ -360,6 +375,77 @@ mod tests {
     }
     fn i(x: i64) -> AttrVal {
         AttrVal::Int(x)
+    }
+
+    // The caps exist because a printer is a device on the network, not because
+    // any real printer misbehaves. Each of these describes what a reader would
+    // see if one did.
+
+    fn pairs(n: usize) -> Vec<(String, Vec<AttrVal>)> {
+        (0..n).map(|k| (format!("attr-{k}"), vec![i(0)])).collect()
+    }
+
+    #[test]
+    fn an_answer_within_the_caps_is_kept_whole() {
+        let out = cap_attrs(pairs(10));
+        assert_eq!(out.len(), 10);
+        assert_eq!(out["attr-0"].len(), 1);
+    }
+
+    // The expected numbers below are written out, not taken from the
+    // constants. A test that reads the same constant it is checking moves with
+    // it and can never fail — which is how a cap raised by accident would ship.
+    // Changing a bound here is meant to cost a deliberate edit to these tests.
+
+    #[test]
+    fn a_printer_that_sends_more_attributes_than_the_cap_has_the_rest_dropped() {
+        let out = cap_attrs(pairs(612));
+        assert_eq!(out.len(), 512);
+    }
+
+    #[test]
+    fn an_attribute_with_more_values_than_the_cap_keeps_only_the_first_ones() {
+        let many: Vec<AttrVal> = (0..306).map(|n| i(n as i64)).collect();
+        let out = cap_attrs([("marker-names".to_string(), many)]);
+        assert_eq!(out["marker-names"].len(), 256);
+    }
+
+    #[test]
+    fn a_value_longer_than_the_cap_is_cut_to_it() {
+        let long = "x".repeat(4596);
+        let out = cap_attrs([("printer-info".to_string(), vec![s(&long)])]);
+        match &out["printer-info"][0] {
+            AttrVal::Str(v) => assert_eq!(v.chars().count(), 4096),
+            other => panic!("expected a string, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_value_that_is_not_a_string_is_left_alone_by_the_length_cap() {
+        let out = cap_attrs([("printer-state".to_string(), vec![i(3)])]);
+        assert_eq!(out["printer-state"], vec![i(3)]);
+    }
+
+    #[test]
+    fn an_attribute_name_longer_than_the_cap_is_cut_to_it() {
+        let long = "n".repeat(4106);
+        let out = cap_attrs([(long, vec![i(1)])]);
+        let key = out.keys().next().unwrap();
+        assert_eq!(key.chars().count(), 4096);
+    }
+
+    #[test]
+    fn a_multibyte_value_is_cut_by_characters_and_stays_valid_text() {
+        // Cutting by bytes would split a codepoint and give back mojibake.
+        let long = "ñ".repeat(4196);
+        let out = cap_attrs([("printer-info".to_string(), vec![s(&long)])]);
+        match &out["printer-info"][0] {
+            AttrVal::Str(v) => {
+                assert_eq!(v.chars().count(), 4096);
+                assert!(v.chars().all(|c| c == 'ñ'));
+            }
+            other => panic!("expected a string, got {other:?}"),
+        }
     }
 
     #[test]
