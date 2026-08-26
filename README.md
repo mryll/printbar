@@ -61,6 +61,17 @@ The same core drives both frontends, so a number reads the same on either one:
 
 ## Installation
 
+### Omarchy
+
+On [Omarchy](https://omarchy.org), the complete installation is two commands, plus the configuration file:
+
+```bash
+yay -S printbar-bin
+omarchy plugin add https://github.com/mryll/printbar.git --enable
+```
+
+The first command installs the prebuilt binary. The second command installs the bar widget and enables it. Then create the configuration file for your printer — refer to [Quick start](#quick-start). For the panel and its settings, refer to [Omarchy shell plugin](#omarchy-shell-plugin).
+
 ### Arch Linux (AUR)
 
 ```bash
