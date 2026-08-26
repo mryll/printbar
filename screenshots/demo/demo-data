@@ -356,14 +356,19 @@ for i in "${!plain[@]}"; do
   filled=$((m_pct[k] * bar_cells / 100))
   # un nivel distinto de cero nunca dibuja la barra vacía
   ((m_pct[k] > 0 && filled == 0)) && filled=1
-  cells="$(repeat "█" "$filled")$(repeat "░" $((bar_cells - filled)))"
+  fill="$(repeat "█" "$filled")"
+  track="$(repeat "░" $((bar_cells - filled)))"
+  cells="${fill}${track}"
   # El hueco absorbe el ancho del propio nivel, así que el ÚLTIMO carácter del
   # nivel cae en el borde derecho diga lo que diga el nivel.
   vp=$((width - M_LEAD - bar_cells - ${#m_val[k]}))
   ((vp < 1)) && vp=1
   gap=$(pad "$vp")
   plain[i]="● ${m_lbl[k]}${m_lpad[k]}  ${cells}${gap}${m_val[k]}"
-  rich[i]="$(paint "${m_swatch[k]}" "●") $(paint "$C_TEXT" "${m_lbl[k]}")${m_lpad[k]}  $(paint "${m_bc[k]}" "$cells")${gap}$(paint "${m_bc[k]}" "${m_val[k]}")"
+  # The fill carries the colorant's own hue and the track is dim, the same
+  # split the real renderer makes; severity stays on the level text. See the
+  # header of omarchy/Panel.qml for why the ramp is kept out of the fill.
+  rich[i]="$(paint "${m_swatch[k]}" "●") $(paint "$C_TEXT" "${m_lbl[k]}")${m_lpad[k]}  $(paint "${m_swatch[k]}" "$fill")$(paint "$C_DIM" "$track")${gap}$(paint "${m_bc[k]}" "${m_val[k]}")"
 done
 
 tooltip=""

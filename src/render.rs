@@ -60,7 +60,7 @@ fn worst_supply_badness(state: &PrinterState) -> Option<u8> {
 
 /// Resolve a bar/tooltip token to its display value, or `None` if absent.
 fn resolve(token: &str, state: &PrinterState) -> Option<String> {
-    use crate::model::{Color, InputTray, SupplyClass, SupplyKind};
+    use crate::model::{Color, SupplyKind};
     let color_pct = |c: Color| {
         state
             .supplies
@@ -227,7 +227,9 @@ struct MeterRow {
     lead: String,
     /// Visible columns that `lead` occupies.
     lead_w: usize,
-    color: String,
+    /// The colorant's own hue, for the FILLED cells. Not the severity ramp:
+    /// see the note on `fill_color` where it is chosen.
+    fill_color: String,
     supply: Supply,
     value: String,
     value_w: usize,
@@ -272,15 +274,12 @@ const BAR_GAP: usize = 2;
 /// rounded UP to the next fifth: 82% drew a completely full bar, indis-
 /// tinguishable from 100%, and 46% drew 60%. Twenty cells at 5% each, rounding
 /// down, means the bar can no longer claim more than the printer reported.
-fn supply_cells(s: &Supply, cells: usize) -> Option<String> {
+fn supply_cells(s: &Supply, cells: usize) -> Option<usize> {
     s.level.as_pct().map(|p| {
         // A level that is not zero never draws an empty bar: 4% is the case a
         // reader most needs to see, and rounding it to nothing hides it.
         let raw = (p.min(100) as usize) * cells / 100;
-        let filled = if p > 0 { raw.max(1) } else { 0 };
-        (0..cells)
-            .map(|i| if i < filled { '\u{2588}' } else { '\u{2591}' })
-            .collect()
+        if p > 0 { raw.max(1) } else { 0 }
     })
 }
 
@@ -358,7 +357,16 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors, p: 
                     let lbl = supply_label(s);
                     let lpad = " ".repeat(label_w.saturating_sub(lbl.chars().count()));
                     let val = level_str(s.level);
-                    let bar_col = supply_color(s, cfg, t);
+                    // Two colors, and which one goes where is the family rule
+                    // (see the header of `omarchy/Panel.qml`): the FILL carries
+                    // the colorant's own hue, and severity stays out of it. A
+                    // red-to-green wash over the fill made a nearly empty
+                    // cartridge and a full one hard to tell apart, and it also
+                    // said "green" about a bar labelled Black. Severity is not
+                    // lost: it colors the level text, exactly as the panel
+                    // moves it to the track outline.
+                    let fill_col = palette::swatch_on_surface(s.color, t);
+                    let sev_col = supply_color(s, cfg, t);
                     // Parked, not rendered: the bar length is not known until
                     // every other row exists. Refer to MeterRow.
                     rows.push(format!("{METER}{}", meters.len()));
@@ -371,9 +379,9 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors, p: 
                         ),
                         // dot + space + label column + the two-space gap
                         lead_w: label_w + 4,
-                        color: bar_col.to_string(),
+                        fill_color: fill_col.to_string(),
                         supply: (*s).clone(),
-                        value: p.fg(bar_col, &val),
+                        value: p.fg(sev_col, &val),
                         value_w: val.chars().count(),
                     });
                 }
@@ -479,14 +487,24 @@ fn build_tooltip(state: &PrinterState, cfg: &PrinterConfig, t: &ThemeColors, p: 
             continue;
         };
         let m = &meters[idx];
-        let cells = supply_cells(&m.supply, bar_cells).unwrap_or_else(|| " ".repeat(bar_cells));
+        // The filled run takes the colorant's hue and the rest is dim track,
+        // so a bar reads as "this much of THIS ink". A level that is not a
+        // percentage has no run to draw and keeps its blank cells.
+        let bar = match supply_cells(&m.supply, bar_cells) {
+            Some(filled) => format!(
+                "{}{}",
+                p.fg(&m.fill_color, &"\u{2588}".repeat(filled)),
+                p.fg(&t.dim, &"\u{2591}".repeat(bar_cells - filled))
+            ),
+            None => " ".repeat(bar_cells),
+        };
         // The gap absorbs the level's own width, so the LAST character of the
         // level lands on the right edge whatever the level says.
         let pad = width.saturating_sub(m.lead_w + bar_cells + m.value_w).max(1);
         *r = format!(
             "{}{}{}{}",
             m.lead,
-            p.fg(&m.color, &cells),
+            bar,
             " ".repeat(pad),
             m.value
         );
@@ -600,6 +618,59 @@ mod tests {
         // The format's OWN markup is the user's and survives untouched.
         let (text, _) = render_template("<b>{model}</b>", &st, OnMissing::Hide);
         assert!(text.starts_with("<b>") && text.ends_with("</b>"));
+    }
+
+    #[test]
+    fn a_supply_bar_is_filled_with_its_own_ink_and_the_level_says_the_severity() {
+        // The family rule, written down in the header of omarchy/Panel.qml:
+        // the FILL carries the colorant's hue, and severity stays out of it —
+        // a bar labelled Cyan drawn green says the wrong thing about which
+        // cartridge it is. Severity is not lost: it colors the level text.
+        // The colors are written out rather than read from the palette: a test
+        // that reads the same value it verifies moves with it and cannot fail.
+        let mut c = cfg();
+        c.tooltip.items = vec!["supplies".into()];
+        let mut st = PrinterState::default();
+        st.supplies.push(consumed("Cyan", Color::Cyan, 46));
+        let tip = render(&st, &c, &ThemeColors::default(), ColorMode::FULL).tooltip;
+
+        // The filled run is cyan ink, the empty track is the theme's dim.
+        assert!(
+            tip.contains("<span foreground='#26c6da'>\u{2588}"),
+            "the fill is not the cyan ink:\n{tip}"
+        );
+        assert!(
+            tip.contains("<span foreground='#5c6370'>\u{2591}"),
+            "the track is not dim:\n{tip}"
+        );
+        // 46% is above both thresholds, so the level reads as ok: green.
+        assert!(
+            tip.contains("<span foreground='#98c379'>46%</span>"),
+            "the level does not carry the severity:\n{tip}"
+        );
+        // And the severity never touches the bar itself.
+        assert!(
+            !tip.contains("<span foreground='#98c379'>\u{2588}"),
+            "severity leaked into the fill:\n{tip}"
+        );
+    }
+
+    #[test]
+    fn a_black_supply_is_drawn_with_the_text_color_not_the_raw_ink() {
+        // Black ink is #262626. On the dark surface a tooltip is drawn on, a
+        // bar in it is invisible — swatch_on_surface is what lifts it to the
+        // theme's text color, and the bar has to use that same helper as the
+        // dot beside it.
+        let mut c = cfg();
+        c.tooltip.items = vec!["supplies".into()];
+        let mut st = PrinterState::default();
+        st.supplies.push(consumed("Black", Color::Black, 82));
+        let tip = render(&st, &c, &ThemeColors::default(), ColorMode::FULL).tooltip;
+        assert!(
+            tip.contains("<span foreground='#abb2bf'>\u{2588}"),
+            "black is not lifted to the text color:\n{tip}"
+        );
+        assert!(!tip.contains("#262626"), "the raw black ink reached the bar:\n{tip}");
     }
 
     #[test]
