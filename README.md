@@ -172,7 +172,7 @@ supply_critical = 5
 #custom-printbar.offline  { color: #5c6370; }
 ```
 
-Those two numbers also set the supply gauge. A supply at or below `supply_critical` is critical, at or below `supply_low` is warn, and a higher value is ok. The core decides that `state` one time. Both frontends render the same verdict, but they show it in different ways. The Waybar tooltip gives the level text a severity color. The panel paints each meter in the **physical color of the colorant**, because cyan toner is cyan. The severity moves to the outline of the meter. A red-to-green ramp made an almost empty cartridge and a full one difficult to tell apart.
+Those two numbers also set the supply gauge. A supply at or below `supply_critical` is critical, at or below `supply_low` is warn, and a higher value is ok. The core decides that `state` one time. Both frontends render the same verdict, and both fill each meter with the **physical color of the colorant**, because cyan toner is cyan. A red-to-green ramp over the fill made an almost empty cartridge and a full one difficult to tell apart, and it also gave a green bar to a row that says Black. The severity stays visible, but away from the fill: the Waybar tooltip gives it to the level text, and the panel gives it to the outline of the meter.
 
 ### Click actions and notifications
 
