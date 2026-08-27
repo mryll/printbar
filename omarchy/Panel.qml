@@ -309,6 +309,26 @@ Panel {
   property int exitCode: 0
   property var pendingCmd: null
 
+  // True when onExited fired for the current run. A missing command emits
+  // no exited. This separates "could not start" from "ran, no output".
+  property bool sawExit: false
+
+  // True only when the run could not START. Gates the copy button.
+  // Operational errors never set it.
+  property bool notInstalled: false
+
+  // One constant, two users: the error message shows it and the copy
+  // button copies it.
+  readonly property string installCmd: "yay -S printbar-bin"
+
+  // The copy button shows a check for a moment.
+  property bool installCopied: false
+  Timer {
+    id: copiedReset
+    interval: 1500
+    onTriggered: root.installCopied = false
+  }
+
   function refresh() {
     startRun(collectCommand())
   }
@@ -321,6 +341,8 @@ Panel {
     collectorDone = false
     processDone = false
     capturedText = ""
+    sawExit = false
+    exitCode = 0
     statusProc.command = cmd
     statusProc.running = true
   }
@@ -332,19 +354,23 @@ Panel {
   }
 
   function finalizeRun() {
+    notInstalled = false
     var text = capturedText.trim()
     if (text === "") {
-      // Empty text must never reach handle(): it would report "unparseable
-      // output" over whatever already explained the emptiness. The tripwire
-      // above leaves capturedText empty too, and there "not installed" is
-      // false — the binary answered, it answered too much.
-      if (root.errorText === "")
-        // The install hint lives HERE and not in the core, which is where every
-        // other message of this family lives. The one message the core cannot
-        // emit is the one about its own absence.
-        setError("printbar produced no output — not installed or not on PATH?\n\n"
-                 + "Install it with:  yay -S printbar-bin\n"
+      // Empty output has three causes. (1) The tripwire already set an
+      // error: keep it. (2) No exited = failed start: report not-installed.
+      // (3) The process ran and printed nothing: an operational error,
+      // never "not installed".
+      if (root.errorText !== "") {
+        // Already explained (tripwire).
+      } else if (!sawExit) {
+        notInstalled = true
+        setError("printbar could not start — not installed or not on PATH?\n\n"
+                 + "Install it with:  " + installCmd + "\n"
                  + "Then open this panel again.")
+      } else {
+        setError("printbar produced no output (exit " + exitCode + ")")
+      }
     } else
       handle(text)
     if (pendingCmd) {
@@ -410,6 +436,7 @@ Panel {
       root.maybeFinalize()
     }
     onExited: function(code) {
+      root.sawExit = true
       root.exitCode = code
       root.processDone = true
       exitFallback.restart() // failed-start case: the collector may never fire
@@ -1020,7 +1047,7 @@ Panel {
             Text {
               id: errorLabel
               anchors.left: parent.left
-              anchors.right: parent.right
+              anchors.right: copyInstallButton.visible ? copyInstallButton.left : parent.right
               anchors.verticalCenter: parent.verticalCenter
               anchors.leftMargin: Style.space(12)
               anchors.rightMargin: Style.space(12)
@@ -1030,6 +1057,28 @@ Panel {
               font.family: root.family
               font.pixelSize: Style.font.caption
               wrapMode: Text.Wrap
+            }
+
+            // Copies installCmd as one argv element: no shell line, no
+            // trailing newline. Gated on notInstalled, never on error text.
+            PanelActionButton {
+              id: copyInstallButton
+              visible: root.notInstalled
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(8)
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: root.installCopied ? "󰄬" : "󰆏"
+              tooltipText: root.installCopied ? "Copied" : "Copy install command"
+              foreground: Qt.darker(root.fg, 1.55)
+              hoverColor: root.fg
+              fontFamily: root.family
+              fontSize: Style.font.caption
+              size: Style.space(20)
+              onClicked: {
+                Util.execArgv(["wl-copy", root.installCmd])
+                root.installCopied = true
+                copiedReset.restart()
+              }
             }
           }
 
