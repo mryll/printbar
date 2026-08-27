@@ -1,6 +1,6 @@
 [package]
 name = "printbar"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 description = "A generic printer monitor for Waybar (IPP + SNMP) — any brand, network or USB"
 license = "MIT"
