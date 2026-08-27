@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "mryll.printbar",
   "name": "Printbar",
-  "version": "0.4.6",
+  "version": "0.5.0",
   "author": "mryll",
   "license": "MIT",
   "description": "Printer status, supplies, trays and jobs (printbar) in the Omarchy bar.",
