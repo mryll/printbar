@@ -138,7 +138,7 @@ fn default_max_rows() -> usize {
     12
 }
 fn default_tooltip_font() -> String {
-    "JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, monospace".into()
+    "JetBrainsMono Nerd Font, JetBrainsMono Nerd Font Mono, monospace".into()
 }
 fn default_low() -> u8 {
     15

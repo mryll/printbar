@@ -22,7 +22,7 @@ on_missing = "hide"          # "hide" | "error"
 # It must be monospace: the rules are box-drawing characters, which in a
 # proportional font render far wider than letters, so the tooltip would size
 # itself to the rules and grow a dead margin to the right of the text.
-# tooltip_font = "JetBrainsMono Nerd Font Mono, JetBrainsMono Nerd Font, monospace"
+# tooltip_font = "JetBrainsMono Nerd Font, JetBrainsMono Nerd Font Mono, monospace"
 items = ["model", "status", "supplies", "paper", "jobs", "impressions"]
 on_missing = "hide"
 max_rows = 12
