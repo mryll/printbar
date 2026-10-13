@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // printbar detail panel. Owns the data: it polls `printbar <name> --json`
@@ -84,7 +85,7 @@ Panel {
 
   // Panel content renders on the popup card, so it uses the popup surface
   // tokens (the bar-face tokens live in BarWidget.qml).
-  readonly property color fg: Color.popups.text
+  readonly property color fg: Commons.Color.popups.text
   readonly property string family: root.bar ? root.bar.fontFamily : Style.font.family
 
   // colorMode (manifest setting): full | none | bar-only | panel-only. The
@@ -105,9 +106,9 @@ Panel {
   readonly property bool barColored:   colorMode === "full" || colorMode === "bar-only"
   readonly property bool panelColored: colorMode === "full" || colorMode === "panel-only"
 
-  readonly property color urgent: panelColored ? Color.urgent : root.fg
-  readonly property color accent: panelColored ? Color.accent : root.fg
-  readonly property color mutedFg: panelColored ? Color.muted : Qt.darker(root.fg, 1.55)
+  readonly property color urgent: panelColored ? Commons.Color.urgent : root.fg
+  readonly property color accent: panelColored ? Commons.Color.accent : root.fg
+  readonly property color mutedFg: panelColored ? Commons.Color.muted : Qt.darker(root.fg, 1.55)
 
   function mixColor(a, b, t) {
     return Qt.rgba(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, 1)
@@ -215,7 +216,7 @@ Panel {
   // The meter track: an alpha wash over the popup card. Monochrome keeps the
   // same subdued wash, taken from the foreground instead of the accent.
   readonly property color trackFill: panelColored
-    ? Style.selectedFillFor(root.fg, Color.accent, root.urgent)
+    ? Style.selectedFillFor(root.fg, Commons.Color.accent, root.urgent)
     : root.alphaColor(root.fg, Style.selectedFillAlpha)
 
   // The fill is the supply's ink at FULL strength at every level — length alone
@@ -252,7 +253,7 @@ Panel {
   // `color_raw` on a dark theme could not. Blend toward the foreground, keeping
   // hue, only as far as it takes to clear the ratio — normally a no-op.
   function legibleOnCard(c) {
-    var bg = Color.popups.background
+    var bg = Commons.Color.popups.background
     var out = c
     for (var i = 0; i < 12 && contrastRatio(out, bg) < 4.5; i++)
       out = mixColor(out, root.fg, 0.2)

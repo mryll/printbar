@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // printbar bar widget: a printer glyph, muted while idle, with the queued-job
@@ -27,13 +28,13 @@ BarWidget {
 
   // barForeground is the bar-face token (transparency-aware), unlike the
   // panel content which uses the popup surface tokens.
-  readonly property color barForeground: root.bar ? root.bar.barForeground : Color.foreground
+  readonly property color barForeground: root.bar ? root.bar.barForeground : Commons.Color.foreground
   // Monochrome: foreground and dimmed foreground only — no urgent token. The
   // glyph still brightens for anything that wants attention, and the panel,
   // the tooltip line and the job count carry the actual severity.
   readonly property color stateColor: !barColored
     ? (urgentState || printing ? barForeground : Qt.darker(barForeground, 1.4))
-    : urgentState ? (root.bar ? root.bar.urgent : Color.urgent)
+    : urgentState ? (root.bar ? root.bar.urgent : Commons.Color.urgent)
     : printing ? barForeground
     : Qt.darker(barForeground, 1.4) // muted while idle
 
