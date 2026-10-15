@@ -38,13 +38,6 @@ BarWidget {
     : printing ? barForeground
     : Qt.darker(barForeground, 1.4) // muted while idle
 
-  // The shell's shared tooltip renders rich text; escape-then-wrap so external
-  // strings (printer model, front-panel text) can't inject markup.
-  function safeTooltip(s) {
-    return "<span>" + String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;").replace(/\n/g, "<br/>") + "</span>"
-  }
-
   function injectPanel() {
     var target = panelLoader.item
     if (!target) return
@@ -119,8 +112,11 @@ BarWidget {
       : "󰐪"
     fontSize: Style.bar.iconFont
     foreground: root.stateColor
-    // Terse; the panel is the detail view.
-    tooltipText: root.panel ? root.safeTooltip(root.panel.tooltipLine) : "Printer"
+    // Terse; the panel is the detail view. The Omarchy bar draws tooltips as
+    // Text.PlainText, so this is plain text: markup such as <span> shows
+    // literally, and external strings (printer model, front-panel text)
+    // cannot inject it.
+    tooltipText: root.panel ? root.panel.tooltipLine : "Printer"
 
     onPressed: function(b) {
       if (b === Qt.RightButton) {
