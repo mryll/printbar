@@ -94,43 +94,30 @@ pub fn read_bounded(path: &Path, limit: u64) -> std::io::Result<String> {
     })
 }
 
-/// Open a path for writing, refusing anything that is not a regular file.
+/// Create `path` as a brand-new regular file, never opening one that exists.
 ///
-/// The write side hangs for the same reason the read side does, and it is the
-/// same predictable path: `open` in write mode on a FIFO waits for a reader
-/// that never comes. `O_NONBLOCK` makes that open return, and the type check
-/// runs on the OPEN DESCRIPTOR so nothing can swap the file after it. The flag
-/// is cleared once the type is settled, for the same reason `read_bounded`
-/// clears it.
+/// The write side takes a predictable path too, so whatever is there may have
+/// been planted. Opening it, even after a type check, writes through a symlink
+/// or a hard link into the file it names, and a FIFO there blocks the open. So
+/// the old entry is unlinked (which removes a symlink, never its target) and
+/// the file is created with `O_EXCL`, which refuses any entry that came back in
+/// between, a symlink included. Nothing that existed before is ever opened.
 ///
-/// A path that does not exist yet is created — that is the ordinary case.
-pub fn open_regular_for_write(path: &Path) -> std::io::Result<std::fs::File> {
+/// The caller owns the path: two writers sharing one would unlink each other's
+/// file mid-write.
+pub fn create_fresh(path: &Path) -> std::io::Result<std::fs::File> {
+    match std::fs::remove_file(path) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+        _ => {}
+    }
     let mut opts = std::fs::OpenOptions::new();
-    opts.write(true).create(true).truncate(false);
+    opts.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        opts.custom_flags(libc::O_NONBLOCK);
+        opts.mode(0o600).custom_flags(libc::O_NOFOLLOW);
     }
-    let file = opts.open(path)?;
-    let meta = file.metadata()?;
-    if !meta.is_file() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!("{} is not a regular file", path.display()),
-        ));
-    }
-    #[cfg(unix)]
-    {
-        use std::os::fd::AsRawFd;
-        let fd = file.as_raw_fd();
-        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-        if flags != -1 {
-            unsafe { libc::fcntl(fd, libc::F_SETFL, flags & !libc::O_NONBLOCK) };
-        }
-    }
-    file.set_len(0)?;
-    Ok(file)
+    opts.open(path)
 }
 
 #[cfg(test)]
@@ -193,19 +180,17 @@ mod tests {
     #[test]
     fn a_write_to_a_new_path_creates_a_regular_file() {
         let p = tmp("w-new").join("f");
-        let mut f = open_regular_for_write(&p).unwrap();
-        use std::io::Write;
+        let mut f = create_fresh(&p).unwrap();
         f.write_all(b"hola").unwrap();
         drop(f);
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "hola");
     }
 
     #[test]
-    fn a_write_truncates_what_was_there() {
+    fn a_write_replaces_what_was_there() {
         let p = tmp("w-trunc").join("f");
         std::fs::write(&p, "una linea mucho mas larga").unwrap();
-        let mut f = open_regular_for_write(&p).unwrap();
-        use std::io::Write;
+        let mut f = create_fresh(&p).unwrap();
         f.write_all(b"corto").unwrap();
         drop(f);
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "corto");
@@ -213,24 +198,60 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_write_to_a_fifo_is_refused_instead_of_waiting_for_a_reader() {
-        // Without O_NONBLOCK this open never returns: writing to a FIFO waits
-        // for a reader that never comes. That is the whole reason this exists.
+    fn a_fifo_is_replaced_instead_of_waiting_for_a_reader() {
+        // Opening a FIFO for write waits for a reader that never comes; the
+        // FIFO is unlinked instead, never opened.
         let p = tmp("w-fifo").join("f");
         let c = std::ffi::CString::new(p.to_str().unwrap()).unwrap();
         assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
-        let e = open_regular_for_write(&p).unwrap_err();
-        assert!(
-            e.kind() == std::io::ErrorKind::InvalidInput
-                || e.raw_os_error() == Some(libc::ENXIO),
-            "got: {e}"
-        );
+        create_fresh(&p).unwrap().write_all(b"ok").unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "ok");
+    }
+
+    /// Before, the open followed a planted symlink, truncated its target and
+    /// wrote over it (marketplace review).
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_is_replaced_and_its_target_left_alone() {
+        let d = tmp("w-symlink");
+        let victim = d.join("victim");
+        std::fs::write(&victim, "private").unwrap();
+        let p = d.join("f");
+        std::os::unix::fs::symlink(&victim, &p).unwrap();
+        create_fresh(&p).unwrap().write_all(b"ok").unwrap();
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "private");
+        assert!(!std::fs::symlink_metadata(&p).unwrap().is_symlink());
+    }
+
+    /// Following a dangling symlink would CREATE the file it names.
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_symlink_creates_nothing_at_its_target() {
+        let d = tmp("w-dangling");
+        let victim = d.join("never-created");
+        let p = d.join("f");
+        std::os::unix::fs::symlink(&victim, &p).unwrap();
+        create_fresh(&p).unwrap();
+        assert!(!victim.exists(), "the write followed the symlink");
+    }
+
+    /// A hard link needs no following at all: opening the path opens the
+    /// victim's inode. Only replacing the entry keeps the write off it.
+    #[test]
+    fn a_hard_link_is_replaced_and_its_inode_left_alone() {
+        let d = tmp("w-hardlink");
+        let victim = d.join("victim");
+        std::fs::write(&victim, "private").unwrap();
+        let p = d.join("f");
+        std::fs::hard_link(&victim, &p).unwrap();
+        create_fresh(&p).unwrap().write_all(b"ok").unwrap();
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "private");
     }
 
     #[test]
     fn a_write_to_a_directory_is_refused() {
         let d = tmp("w-dir");
-        assert!(open_regular_for_write(&d).is_err());
+        assert!(create_fresh(&d).is_err());
     }
 
     #[cfg(unix)]
