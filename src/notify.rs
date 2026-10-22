@@ -78,17 +78,21 @@ fn load_prev(path: &std::path::Path) -> Vec<String> {
 
 fn save_cur(path: &std::path::Path, cur: &[String]) {
     // Atomic: write to a temp sibling then rename.
-    // The temp sibling is a predictable path too, so it gets the same guard as
-    // any other write: a FIFO planted there would hang this on `open`, and this
-    // runs on the Waybar path, inside the shell.
-    let tmp = path.with_extension("json.tmp");
+    // The temp sibling is a predictable path too, so it is created fresh: a
+    // symlink, hard link or FIFO planted there is replaced, never opened. It is
+    // named per process because nothing serialises the Waybar run and the
+    // Omarchy one, and `create_fresh` would unlink a sibling's file mid-write.
+    let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
     if let Ok(s) = serde_json::to_string(cur) {
-        if let Ok(mut f) = crate::safe_read::open_regular_for_write(&tmp) {
+        if let Ok(mut f) = crate::safe_read::create_fresh(&tmp) {
             use std::io::Write;
             if f.write_all(s.as_bytes()).is_ok() && f.sync_all().is_ok() {
                 drop(f);
-                let _ = std::fs::rename(&tmp, path);
+                if std::fs::rename(&tmp, path).is_ok() {
+                    return;
+                }
             }
+            let _ = std::fs::remove_file(&tmp);
         }
     }
 }
@@ -147,6 +151,25 @@ mod tests {
         let cfg = vec!["jam".to_string()];
         // offline became active but isn't configured → not fired
         assert!(diff_events(&[], &["offline".into()], &cfg).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_planted_at_the_temp_path_never_receives_the_state() {
+        let d = std::env::temp_dir().join("printbar-notify-symlink");
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let path = d.join("printbar-x.json");
+        let victim = d.join("victim");
+        std::fs::write(&victim, "private").unwrap();
+        let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
+        std::os::unix::fs::symlink(&victim, &tmp).unwrap();
+
+        save_cur(&path, &["jam".to_string()]);
+
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "private");
+        assert_eq!(load_prev(&path), vec!["jam".to_string()]);
+        assert!(!tmp.exists(), "the temp file was left behind");
     }
 
     #[test]
